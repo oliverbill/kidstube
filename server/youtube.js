@@ -8,6 +8,14 @@ const mockdata = require('./mockdata');
 
 const API_BASE = 'https://www.googleapis.com/youtube/v3';
 
+// Paginação: o YouTube devolve no máximo 50 itens por página. Buscamos páginas
+// sucessivas (via nextPageToken) até termos tantos resultados sobreviventes ao
+// filtro de bloqueio quanto os que o YouTube mostra normalmente, ou até acabarem
+// as páginas / atingirmos o teto (para não estourar a quota da API).
+const PAGE_SIZE = 50;
+const TARGET_RESULTS = 30;
+const MAX_PAGES = 4;
+
 // ---------- Cache em memória (10 min, chave = url) para poupar quota ----------
 
 const CACHE_TTL_MS = 10 * 60 * 1000;
@@ -169,17 +177,25 @@ async function search(q) {
       normalize(`${v.title}\n${v.description}\n${v.channelTitle}`).includes(nq),
     );
   } else {
-    const data = await apiGet('/search', {
-      part: 'snippet',
-      type: 'video',
-      q,
-      maxResults: 25,
-      safeSearch: cfg.safeSearch,
-    });
-    videos = (data.items || [])
-      .filter((it) => it.id?.videoId)
-      .map((it) => videoFromSnippet(it.id.videoId, it.snippet, null));
-    videos = await enrich(videos);
+    videos = [];
+    let pageToken;
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const data = await apiGet('/search', {
+        part: 'snippet',
+        type: 'video',
+        q,
+        maxResults: PAGE_SIZE,
+        safeSearch: cfg.safeSearch,
+        pageToken,
+      });
+      const pageVideos = (data.items || [])
+        .filter((it) => it.id?.videoId)
+        .map((it) => videoFromSnippet(it.id.videoId, it.snippet, null));
+      videos = videos.concat(await enrich(pageVideos));
+      pageToken = data.nextPageToken;
+      const survivors = videos.filter((v) => !isBlocked(v)).length;
+      if (!pageToken || survivors >= TARGET_RESULTS) break;
+    }
   }
   return { blockedQuery: false, items: filterVideos(videos).map(stripDescription) };
 }
@@ -241,16 +257,25 @@ async function channelUploads(channelId) {
   const ch = await apiGet('/channels', { part: 'contentDetails', id: channelId });
   const uploads = ch.items?.[0]?.contentDetails?.relatedPlaylists?.uploads;
   if (!uploads) return [];
-  const pl = await apiGet('/playlistItems', {
-    part: 'snippet,contentDetails',
-    playlistId: uploads,
-    maxResults: 25,
-  });
-  let videos = (pl.items || [])
-    .filter((it) => it.contentDetails?.videoId)
-    .map((it) => videoFromSnippet(it.contentDetails.videoId, it.snippet, null))
-    .map((v) => ({ ...v, channelId })); // snippet de playlistItems traz channelId do dono da playlist
-  return enrich(videos);
+  let videos = [];
+  let pageToken;
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const pl = await apiGet('/playlistItems', {
+      part: 'snippet,contentDetails',
+      playlistId: uploads,
+      maxResults: PAGE_SIZE,
+      pageToken,
+    });
+    const pageVideos = (pl.items || [])
+      .filter((it) => it.contentDetails?.videoId)
+      .map((it) => videoFromSnippet(it.contentDetails.videoId, it.snippet, null))
+      .map((v) => ({ ...v, channelId })); // snippet de playlistItems traz channelId do dono da playlist
+    videos = videos.concat(await enrich(pageVideos));
+    pageToken = pl.nextPageToken;
+    const survivors = videos.filter((v) => !isBlocked(v)).length;
+    if (!pageToken || survivors >= TARGET_RESULTS) break;
+  }
+  return videos;
 }
 
 async function channel(channelId) {
