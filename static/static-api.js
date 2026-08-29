@@ -407,11 +407,12 @@
     return filterVideos(videos, blocked).map(stripDescription);
   }
 
-  async function search(q) {
+  async function search(q, pageToken) {
     const blocked = await getBlocklist();
-    if (isQueryBlocked(q, blocked)) return { blockedQuery: true, items: [] };
+    if (isQueryBlocked(q, blocked)) return { blockedQuery: true, items: [], nextPageToken: null };
     const cfg = getConfig();
     let videos;
+    let nextPageToken = null;
     if (usingMock()) {
       const nq = normalize(q);
       videos = MOCK_VIDEOS.filter((v) =>
@@ -419,7 +420,7 @@
       );
     } else {
       videos = [];
-      let pageToken;
+      let token = pageToken || undefined;
       for (let page = 0; page < MAX_PAGES; page++) {
         const data = await apiGet('/search', {
           part: 'snippet',
@@ -427,47 +428,48 @@
           q,
           maxResults: PAGE_SIZE,
           safeSearch: cfg.safeSearch,
-          pageToken,
+          pageToken: token,
         });
         const pageVideos = (data.items || [])
           .filter((it) => it.id?.videoId)
           .map((it) => videoFromSnippet(it.id.videoId, it.snippet, null));
         videos = videos.concat(await enrich(pageVideos));
-        pageToken = data.nextPageToken;
+        token = data.nextPageToken || null;
         const survivors = videos.filter((v) => !isBlocked(v, blocked)).length;
-        if (!pageToken || survivors >= TARGET_RESULTS) break;
+        if (!token || survivors >= TARGET_RESULTS) break;
       }
+      nextPageToken = token || null;
     }
-    return { blockedQuery: false, items: filterVideos(videos, blocked).map(stripDescription) };
+    return { blockedQuery: false, items: filterVideos(videos, blocked).map(stripDescription), nextPageToken };
   }
 
-  async function channelUploads(channelId) {
+  async function channelUploads(channelId, pageToken) {
     if (usingMock()) {
-      return MOCK_VIDEOS.filter((v) => v.channelId === channelId);
+      return { videos: MOCK_VIDEOS.filter((v) => v.channelId === channelId), nextPageToken: null };
     }
+    const blocked = await getBlocklist();
     const ch = await apiGet('/channels', { part: 'contentDetails', id: channelId });
     const uploads = ch.items?.[0]?.contentDetails?.relatedPlaylists?.uploads;
-    if (!uploads) return [];
-    const blocked = await getBlocklist();
+    if (!uploads) return { videos: [], nextPageToken: null };
     let videos = [];
-    let pageToken;
+    let token = pageToken || undefined;
     for (let page = 0; page < MAX_PAGES; page++) {
       const pl = await apiGet('/playlistItems', {
         part: 'snippet,contentDetails',
         playlistId: uploads,
         maxResults: PAGE_SIZE,
-        pageToken,
+        pageToken: token,
       });
       const pageVideos = (pl.items || [])
         .filter((it) => it.contentDetails?.videoId)
         .map((it) => videoFromSnippet(it.contentDetails.videoId, it.snippet, null))
         .map((v) => ({ ...v, channelId })); // snippet de playlistItems traz channelId do dono da playlist
       videos = videos.concat(await enrich(pageVideos));
-      pageToken = pl.nextPageToken;
+      token = pl.nextPageToken || null;
       const survivors = videos.filter((v) => !isBlocked(v, blocked)).length;
-      if (!pageToken || survivors >= TARGET_RESULTS) break;
+      if (!token || survivors >= TARGET_RESULTS) break;
     }
-    return videos;
+    return { videos, nextPageToken: token || null };
   }
 
   async function videoDetails(id) {
@@ -489,7 +491,7 @@
     // Relacionados: outros vídeos do MESMO canal (playlist de uploads), filtrados.
     let related = [];
     try {
-      related = await channelUploads(video.channelId);
+      related = (await channelUploads(video.channelId)).videos;
     } catch {
       related = [];
     }
@@ -497,10 +499,10 @@
     return { video: stripDescription(video), blocked: false, related };
   }
 
-  async function channel(channelId) {
+  async function channel(channelId, pageToken) {
     const blocked = await getBlocklist();
     if (isChannelBlocked(channelId, blocked)) {
-      return { channel: { id: channelId, title: '' }, items: [], blocked: true };
+      return { channel: { id: channelId, title: '' }, items: [], blocked: true, nextPageToken: null };
     }
     let title = '';
     if (usingMock()) {
@@ -509,8 +511,9 @@
       const ch = await apiGet('/channels', { part: 'snippet', id: channelId });
       title = ch.items?.[0]?.snippet?.title || '';
     }
-    const items = filterVideos(await channelUploads(channelId), blocked).map(stripDescription);
-    return { channel: { id: channelId, title }, items, blocked: false };
+    const { videos, nextPageToken } = await channelUploads(channelId, pageToken);
+    const items = filterVideos(videos, blocked).map(stripDescription);
+    return { channel: { id: channelId, title }, items, blocked: false, nextPageToken };
   }
 
   // ---------- Mutadores de config (equivalentes ao store.js) ----------
@@ -590,14 +593,14 @@
       }
       if (method === 'GET' && pathname === '/api/search') {
         const q = searchParams.get('q') || '';
-        return json(await search(q));
+        return json(await search(q, searchParams.get('pageToken') || undefined));
       }
       let m;
       if (method === 'GET' && (m = /^\/api\/video\/([^/]+)$/.exec(pathname))) {
         return json(await videoDetails(decodeURIComponent(m[1])));
       }
       if (method === 'GET' && (m = /^\/api\/channel\/([^/]+)$/.exec(pathname))) {
-        return json(await channel(decodeURIComponent(m[1])));
+        return json(await channel(decodeURIComponent(m[1]), searchParams.get('pageToken') || undefined));
       }
       if (method === 'GET' && pathname === '/api/status') {
         const cfg = getConfig();

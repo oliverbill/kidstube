@@ -161,12 +161,50 @@ async function apiGet(path) {
   return res.json();
 }
 
+// ---------- Scroll infinito ----------
+
+let scrollObserver = null;
+
+function stopInfiniteScroll() {
+  if (scrollObserver) {
+    scrollObserver.disconnect();
+    scrollObserver = null;
+  }
+}
+
+// Observa um sentinela no fim da grid; ao aproximar-se dele, chama fetchNext()
+// (que deve devolver `true` se ainda há mais páginas). Pára sozinho quando
+// fetchNext devolve false/lança, ou quando a navegação muda (seq desatualizado).
+function startInfiniteScroll(seq, fetchNext) {
+  stopInfiniteScroll();
+  const sentinel = el('div', 'scroll-sentinel');
+  sentinel.style.height = '1px';
+  let loading = false;
+  scrollObserver = new IntersectionObserver((entries) => {
+    if (seq !== renderSeq) { stopInfiniteScroll(); return; }
+    if (!entries[0].isIntersecting || loading) return;
+    loading = true;
+    fetchNext()
+      .then((hasMore) => {
+        loading = false;
+        if (seq !== renderSeq || !hasMore) stopInfiniteScroll();
+      })
+      .catch(() => {
+        loading = false;
+        stopInfiniteScroll();
+      });
+  }, { rootMargin: '600px' });
+  scrollObserver.observe(sentinel);
+  app.appendChild(sentinel);
+}
+
 // ---------- Vistas ----------
 
 let renderSeq = 0; // ignora respostas de navegações antigas
 
 async function viewHome() {
   const seq = ++renderSeq;
+  stopInfiniteScroll();
   showSkeletonGrid();
   try {
     const data = await apiGet('/api/home');
@@ -184,6 +222,7 @@ async function viewHome() {
 
 async function viewSearch(query) {
   const seq = ++renderSeq;
+  stopInfiniteScroll();
   searchInput.value = query;
   showSkeletonGrid();
   try {
@@ -205,7 +244,20 @@ async function viewSearch(query) {
       showMessage({ emoji: '🔍', title: 'Nada encontrado', text: 'Tenta outras palavras.' });
       return;
     }
-    app.appendChild(videoGrid(data.items));
+    const grid = videoGrid(data.items);
+    app.appendChild(grid);
+    let nextPageToken = data.nextPageToken || null;
+    if (nextPageToken) {
+      startInfiniteScroll(seq, async () => {
+        const more = await apiGet(
+          `/api/search?q=${encodeURIComponent(query)}&pageToken=${encodeURIComponent(nextPageToken)}`,
+        );
+        if (seq !== renderSeq) return false;
+        for (const v of more.items || []) grid.appendChild(videoCard(v));
+        nextPageToken = more.nextPageToken || null;
+        return Boolean(nextPageToken);
+      });
+    }
   } catch {
     if (seq === renderSeq) showError(() => viewSearch(query));
   }
@@ -213,6 +265,7 @@ async function viewSearch(query) {
 
 async function viewWatch(id) {
   const seq = ++renderSeq;
+  stopInfiniteScroll();
   showSkeletonWatch();
   try {
     const data = await apiGet(`/api/video/${encodeURIComponent(id)}`);
@@ -262,6 +315,7 @@ async function viewWatch(id) {
 
 async function viewChannel(id) {
   const seq = ++renderSeq;
+  stopInfiniteScroll();
   showSkeletonGrid();
   try {
     const data = await apiGet(`/api/channel/${encodeURIComponent(id)}`);
@@ -282,7 +336,20 @@ async function viewChannel(id) {
       showMessage({ emoji: '📺', title: 'Este canal ainda não tem vídeos' });
       return;
     }
-    app.appendChild(videoGrid(data.items));
+    const grid = videoGrid(data.items);
+    app.appendChild(grid);
+    let nextPageToken = data.nextPageToken || null;
+    if (nextPageToken) {
+      startInfiniteScroll(seq, async () => {
+        const more = await apiGet(
+          `/api/channel/${encodeURIComponent(id)}?pageToken=${encodeURIComponent(nextPageToken)}`,
+        );
+        if (seq !== renderSeq) return false;
+        for (const v of more.items || []) grid.appendChild(videoCard(v));
+        nextPageToken = more.nextPageToken || null;
+        return Boolean(nextPageToken);
+      });
+    }
   } catch {
     if (seq === renderSeq) showError(() => viewChannel(id));
   }

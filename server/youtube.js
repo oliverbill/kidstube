@@ -167,10 +167,11 @@ async function home() {
   return filterVideos(videos).map(stripDescription);
 }
 
-async function search(q) {
-  if (isQueryBlocked(q)) return { blockedQuery: true, items: [] };
+async function search(q, pageToken) {
+  if (isQueryBlocked(q)) return { blockedQuery: true, items: [], nextPageToken: null };
   const cfg = store.getConfig();
   let videos;
+  let nextPageToken = null;
   if (usingMock()) {
     const nq = normalize(q);
     videos = mockdata.VIDEOS.filter((v) =>
@@ -178,7 +179,7 @@ async function search(q) {
     );
   } else {
     videos = [];
-    let pageToken;
+    let token = pageToken || undefined;
     for (let page = 0; page < MAX_PAGES; page++) {
       const data = await apiGet('/search', {
         part: 'snippet',
@@ -186,18 +187,19 @@ async function search(q) {
         q,
         maxResults: PAGE_SIZE,
         safeSearch: cfg.safeSearch,
-        pageToken,
+        pageToken: token,
       });
       const pageVideos = (data.items || [])
         .filter((it) => it.id?.videoId)
         .map((it) => videoFromSnippet(it.id.videoId, it.snippet, null));
       videos = videos.concat(await enrich(pageVideos));
-      pageToken = data.nextPageToken;
+      token = data.nextPageToken || null;
       const survivors = videos.filter((v) => !isBlocked(v)).length;
-      if (!pageToken || survivors >= TARGET_RESULTS) break;
+      if (!token || survivors >= TARGET_RESULTS) break;
     }
+    nextPageToken = token || null;
   }
-  return { blockedQuery: false, items: filterVideos(videos).map(stripDescription) };
+  return { blockedQuery: false, items: filterVideos(videos).map(stripDescription), nextPageToken };
 }
 
 // Pesquisa de canais por nome/@handle (para a administração escolher qual bloquear).
@@ -242,7 +244,7 @@ async function videoDetails(id) {
   // Relacionados: outros vídeos do MESMO canal (playlist de uploads), filtrados.
   let related = [];
   try {
-    related = await channelUploads(video.channelId);
+    related = (await channelUploads(video.channelId)).videos;
   } catch {
     related = [];
   }
@@ -250,37 +252,37 @@ async function videoDetails(id) {
   return { video: stripDescription(video), blocked: false, related };
 }
 
-async function channelUploads(channelId) {
+async function channelUploads(channelId, pageToken) {
   if (usingMock()) {
-    return mockdata.VIDEOS.filter((v) => v.channelId === channelId);
+    return { videos: mockdata.VIDEOS.filter((v) => v.channelId === channelId), nextPageToken: null };
   }
   const ch = await apiGet('/channels', { part: 'contentDetails', id: channelId });
   const uploads = ch.items?.[0]?.contentDetails?.relatedPlaylists?.uploads;
-  if (!uploads) return [];
+  if (!uploads) return { videos: [], nextPageToken: null };
   let videos = [];
-  let pageToken;
+  let token = pageToken || undefined;
   for (let page = 0; page < MAX_PAGES; page++) {
     const pl = await apiGet('/playlistItems', {
       part: 'snippet,contentDetails',
       playlistId: uploads,
       maxResults: PAGE_SIZE,
-      pageToken,
+      pageToken: token,
     });
     const pageVideos = (pl.items || [])
       .filter((it) => it.contentDetails?.videoId)
       .map((it) => videoFromSnippet(it.contentDetails.videoId, it.snippet, null))
       .map((v) => ({ ...v, channelId })); // snippet de playlistItems traz channelId do dono da playlist
     videos = videos.concat(await enrich(pageVideos));
-    pageToken = pl.nextPageToken;
+    token = pl.nextPageToken || null;
     const survivors = videos.filter((v) => !isBlocked(v)).length;
-    if (!pageToken || survivors >= TARGET_RESULTS) break;
+    if (!token || survivors >= TARGET_RESULTS) break;
   }
-  return videos;
+  return { videos, nextPageToken: token || null };
 }
 
-async function channel(channelId) {
+async function channel(channelId, pageToken) {
   if (isChannelBlocked(channelId)) {
-    return { channel: { id: channelId, title: '' }, items: [], blocked: true };
+    return { channel: { id: channelId, title: '' }, items: [], blocked: true, nextPageToken: null };
   }
   let title = '';
   if (usingMock()) {
@@ -289,8 +291,9 @@ async function channel(channelId) {
     const ch = await apiGet('/channels', { part: 'snippet', id: channelId });
     title = ch.items?.[0]?.snippet?.title || '';
   }
-  const items = filterVideos(await channelUploads(channelId)).map(stripDescription);
-  return { channel: { id: channelId, title }, items, blocked: false };
+  const { videos, nextPageToken } = await channelUploads(channelId, pageToken);
+  const items = filterVideos(videos).map(stripDescription);
+  return { channel: { id: channelId, title }, items, blocked: false, nextPageToken };
 }
 
 module.exports = {

@@ -192,7 +192,8 @@ async function handleApi(req, res, url) {
   if (method === 'GET' && p === '/api/search') {
     const q = (url.searchParams.get('q') || '').trim();
     if (!q) return sendError(res, 400, 'Parâmetro q em falta.');
-    const result = await yt.search(q);
+    const pageToken = url.searchParams.get('pageToken') || undefined;
+    const result = await yt.search(q, pageToken);
     return sendJson(res, 200, result);
   }
 
@@ -204,7 +205,8 @@ async function handleApi(req, res, url) {
 
   m = p.match(/^\/api\/channel\/([^/]+)$/);
   if (method === 'GET' && m) {
-    const result = await yt.channel(decodeURIComponent(m[1]));
+    const pageToken = url.searchParams.get('pageToken') || undefined;
+    const result = await yt.channel(decodeURIComponent(m[1]), pageToken);
     return sendJson(res, 200, result);
   }
 
