@@ -332,5 +332,5 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`youtube-filter a escutar em http://localhost:${PORT} (mock=${yt.usingMock()})`);
+  console.log(`kidstube a escutar em http://localhost:${PORT} (mock=${yt.usingMock()})`);
 });

@@ -44,7 +44,7 @@ monta o site com `node scripts/build-static.mjs` e injeta a chave fixa a partir 
 precisam de colar chave nenhuma; uma chave colada na administração sobrepõe-se à fixa.
 O `docs/` é gerado no CI (está no .gitignore); a versão estática: o `static-api.js`
 implementa a API no próprio browser (YouTube API direta, PIN em `localStorage`). Serve para
-publicar em https://oliverbill.github.io/youtube-filter/ — mas o filtro passa a correr **no
+publicar em https://oliverbill.github.io/kidstube/ — mas o filtro passa a correr **no
 cliente**: num iPad de criança é eficaz na prática, mas quem tiver acesso técnico ao browser
 consegue inspecioná-lo. A versão com servidor continua a ser a mais blindada. A chave API é
 introduzida na administração e fica só no `localStorage` do dispositivo (nunca é publicada);
@@ -61,7 +61,7 @@ Para **gravar** bloqueios a partir do painel (não é preciso para ler/navegar):
 
 1. Cria um token em
    [github.com/settings/personal-access-tokens/new](https://github.com/settings/personal-access-tokens/new),
-   com acesso restrito ao repositório `youtube-filter` e permissão **Contents: Read and write**.
+   com acesso restrito ao repositório `kidstube` e permissão **Contents: Read and write**.
 2. No painel de administração (`.../admin.html`, PIN necessário) → **Definições** → cola o
    token em "Token do GitHub". Fica só no `localStorage` desse dispositivo — nunca é publicado
    nem sai daí.

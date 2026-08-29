@@ -1,4 +1,4 @@
-# youtube-filter — Spec (contrato interno)
+# kidstube — Spec (contrato interno)
 
 App para iPad (PWA) tipo YouTube com controlo parental: bloqueio de **canais**, **temas
 (palavras-chave)** e **vídeos específicos**. O filtro corre **no servidor** — o cliente nunca
@@ -47,9 +47,9 @@ As duas variantes divergem deliberadamente em ONDE vive a lista de bloqueio:
   público, lido por todos os dispositivos via `raw.githubusercontent.com` (cache de 5 min
   em memória + fallback em localStorage se a rede falhar). Isto é o que faz um bloqueio
   feito num dispositivo valer em todos os outros com a app instalada.
-  - Leitura: `GET https://raw.githubusercontent.com/oliverbill/youtube-filter/main/blocklist.json`
+  - Leitura: `GET https://raw.githubusercontent.com/oliverbill/kidstube/main/blocklist.json`
     — sem autenticação (repo público).
-  - Escrita: só a partir do painel admin, via `PUT /repos/oliverbill/youtube-filter/contents/blocklist.json`
+  - Escrita: só a partir do painel admin, via `PUT /repos/oliverbill/kidstube/contents/blocklist.json`
     (API do GitHub), autenticado com um token pessoal (fine-grained, scope `Contents: Read
     and write` só neste repo) colado uma vez em `Definições` → fica em
     `localStorage["kidtube-gh-token"]` **desse dispositivo**, nunca é publicado.

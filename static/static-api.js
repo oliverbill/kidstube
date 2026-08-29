@@ -176,7 +176,7 @@
   // ---------- Bloqueio centralizado (blocklist.json no GitHub, partilhado) ----------
 
   const BLOCKLIST_OWNER = 'oliverbill';
-  const BLOCKLIST_REPO = 'youtube-filter';
+  const BLOCKLIST_REPO = 'kidstube';
   const BLOCKLIST_BRANCH = 'main';
   const BLOCKLIST_URL =
     `https://raw.githubusercontent.com/${BLOCKLIST_OWNER}/${BLOCKLIST_REPO}/${BLOCKLIST_BRANCH}/blocklist.json`;

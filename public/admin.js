@@ -19,7 +19,7 @@ const state = {
 // ---------------------------------------------------------------------------
 
 const GH_OWNER = 'oliverbill';
-const GH_REPO = 'youtube-filter';
+const GH_REPO = 'kidstube';
 const GH_PATH = 'blocklist.json';
 const GH_BRANCH = 'main';
 const GH_TOKEN_KEY = 'kidtube-gh-token';
