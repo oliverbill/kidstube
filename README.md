@@ -33,6 +33,16 @@ Servidor em `http://<ip-do-mac>:8478`. Sem dependências npm — só Node ≥ 18
 - A reprodução usa o player embutido oficial (`youtube-nocookie.com`) com `rel=0`, que limita
   as sugestões de fim de vídeo ao mesmo canal.
 
+## Variante estática (GitHub Pages)
+
+`docs/` contém uma versão 100% estática, montada por `node scripts/build-static.mjs`:
+o `static-api.js` implementa a API no próprio browser (YouTube API direta + listas e PIN em
+`localStorage`). Serve para publicar em https://oliverbill.github.io/youtube-filter/ — mas o
+filtro passa a correr **no cliente**: num iPad de criança é eficaz na prática, mas quem tiver
+acesso técnico ao browser consegue inspecioná-lo. A versão com servidor continua a ser a mais
+blindada. A chave API é introduzida na administração e fica só no `localStorage` do dispositivo
+(nunca é publicada); restringe-a por referrer HTTP no Google Cloud Console.
+
 ## Limitações honestas
 
 - O ecrã final do player embutido ainda mostra vídeos do mesmo canal (comportamento do YouTube,
