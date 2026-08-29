@@ -434,7 +434,7 @@
           .map((it) => videoFromSnippet(it.id.videoId, it.snippet, null));
         videos = videos.concat(await enrich(pageVideos));
         pageToken = data.nextPageToken;
-        const survivors = videos.filter((v) => !isBlocked(v)).length;
+        const survivors = videos.filter((v) => !isBlocked(v, blocked)).length;
         if (!pageToken || survivors >= TARGET_RESULTS) break;
       }
     }
@@ -448,6 +448,7 @@
     const ch = await apiGet('/channels', { part: 'contentDetails', id: channelId });
     const uploads = ch.items?.[0]?.contentDetails?.relatedPlaylists?.uploads;
     if (!uploads) return [];
+    const blocked = await getBlocklist();
     let videos = [];
     let pageToken;
     for (let page = 0; page < MAX_PAGES; page++) {
@@ -463,7 +464,7 @@
         .map((v) => ({ ...v, channelId })); // snippet de playlistItems traz channelId do dono da playlist
       videos = videos.concat(await enrich(pageVideos));
       pageToken = pl.nextPageToken;
-      const survivors = videos.filter((v) => !isBlocked(v)).length;
+      const survivors = videos.filter((v) => !isBlocked(v, blocked)).length;
       if (!pageToken || survivors >= TARGET_RESULTS) break;
     }
     return videos;
