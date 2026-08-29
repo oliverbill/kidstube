@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="pt-PT">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>KidTube — Administração</title>
+  <meta name="theme-color" content="#0f0f0f">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="KidTube">
+  <link rel="apple-touch-icon" href="/icons/icon-180.png">
+  <link rel="icon" type="image/png" href="/icons/icon-180.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="/admin.css">
+</head>
+<body>
+  <!-- Ecrã de PIN -->
+  <div id="pin-screen" class="pin-screen" hidden>
+    <div class="pin-card">
+      <div class="pin-logo">
+        <span class="logo-badge">▶</span>
+        <span class="logo-text">KidTube</span>
+      </div>
+      <h1 id="pin-title">Administração</h1>
+      <p id="pin-subtitle" class="pin-subtitle"></p>
+
+      <!-- Definir PIN (primeira vez) -->
+      <form id="pin-setup-form" hidden autocomplete="off">
+        <label for="pin-new">Novo PIN</label>
+        <input id="pin-new" type="password" inputmode="numeric" autocomplete="new-password"
+               minlength="4" maxlength="12" required placeholder="mín. 4 dígitos">
+        <label for="pin-new2">Confirmar PIN</label>
+        <input id="pin-new2" type="password" inputmode="numeric" autocomplete="new-password"
+               minlength="4" maxlength="12" required placeholder="repita o PIN">
+        <button type="submit" class="btn btn-primary">Definir PIN</button>
+      </form>
+
+      <!-- Pedir PIN -->
+      <form id="pin-entry-form" hidden autocomplete="off">
+        <label for="pin-input">PIN</label>
+        <input id="pin-input" type="password" inputmode="numeric" autocomplete="current-password"
+               maxlength="12" required placeholder="Introduza o PIN">
+        <button type="submit" class="btn btn-primary">Entrar</button>
+      </form>
+
+      <p id="pin-error" class="error" hidden></p>
+      <a class="back-link" href="/">← Voltar à app</a>
+    </div>
+  </div>
+
+  <!-- Painel de administração -->
+  <div id="admin-screen" hidden>
+    <header class="topbar">
+      <div class="pin-logo">
+        <span class="logo-badge">▶</span>
+        <span class="logo-text">KidTube <small>admin</small></span>
+      </div>
+      <div class="topbar-actions">
+        <a class="back-link" href="/">← Voltar à app</a>
+        <button id="lock-btn" class="btn btn-ghost" type="button">Bloquear</button>
+      </div>
+    </header>
+
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-tab="channels" role="tab">Canais bloqueados</button>
+      <button class="tab" data-tab="keywords" role="tab">Temas</button>
+      <button class="tab" data-tab="videos" role="tab">Vídeos bloqueados</button>
+      <button class="tab" data-tab="settings" role="tab">Definições</button>
+    </nav>
+
+    <main>
+      <p id="admin-msg" class="flash" hidden></p>
+
+      <!-- Canais -->
+      <section id="tab-channels" class="tab-panel" role="tabpanel">
+        <h2>Canais bloqueados</h2>
+        <form id="channel-form" class="add-form" autocomplete="off">
+          <input id="channel-input" type="text" required
+                 placeholder="URL do canal (…/channel/UC…) ou ID UC…">
+          <input id="channel-title" type="text" placeholder="Título (opcional)">
+          <button type="submit" class="btn btn-primary">Bloquear canal</button>
+        </form>
+        <p id="channel-error" class="error" hidden></p>
+        <ul id="channel-list" class="item-list"></ul>
+        <p id="channel-empty" class="empty" hidden>Nenhum canal bloqueado.</p>
+      </section>
+
+      <!-- Palavras-chave -->
+      <section id="tab-keywords" class="tab-panel" role="tabpanel" hidden>
+        <h2>Temas (palavras-chave)</h2>
+        <p class="hint">Vídeos cujo título, descrição ou canal contenha uma destas palavras
+          são bloqueados. Sem distinção de maiúsculas nem acentos.</p>
+        <form id="keyword-form" class="add-form" autocomplete="off">
+          <input id="keyword-input" type="text" required placeholder="ex.: minecraft">
+          <button type="submit" class="btn btn-primary">Bloquear tema</button>
+        </form>
+        <p id="keyword-error" class="error" hidden></p>
+        <ul id="keyword-list" class="item-list"></ul>
+        <p id="keyword-empty" class="empty" hidden>Nenhum tema bloqueado.</p>
+      </section>
+
+      <!-- Vídeos -->
+      <section id="tab-videos" class="tab-panel" role="tabpanel" hidden>
+        <h2>Vídeos bloqueados</h2>
+        <form id="video-form" class="add-form" autocomplete="off">
+          <input id="video-input" type="text" required
+                 placeholder="URL do vídeo (watch?v=…, youtu.be/…) ou ID">
+          <input id="video-title" type="text" placeholder="Título (opcional)">
+          <button type="submit" class="btn btn-primary">Bloquear vídeo</button>
+        </form>
+        <p id="video-error" class="error" hidden></p>
+        <ul id="video-list" class="item-list"></ul>
+        <p id="video-empty" class="empty" hidden>Nenhum vídeo bloqueado.</p>
+      </section>
+
+      <!-- Definições -->
+      <section id="tab-settings" class="tab-panel" role="tabpanel" hidden>
+        <h2>Definições</h2>
+
+        <div class="settings-block">
+          <h3>Chave da API do YouTube</h3>
+          <p id="apikey-status" class="hint"></p>
+          <form id="apikey-form" class="add-form" autocomplete="off">
+            <input id="apikey-input" type="password" autocomplete="off"
+                   placeholder="Colar nova chave da API">
+            <button type="submit" class="btn btn-primary">Guardar chave</button>
+          </form>
+          <p id="apikey-error" class="error" hidden></p>
+        </div>
+
+        <div class="settings-block">
+          <h3>Região</h3>
+          <form id="region-form" class="add-form" autocomplete="off">
+            <select id="region-select">
+              <option value="PT">Portugal (PT)</option>
+              <option value="BR">Brasil (BR)</option>
+              <option value="US">Estados Unidos (US)</option>
+              <option value="GB">Reino Unido (GB)</option>
+              <option value="ES">Espanha (ES)</option>
+              <option value="FR">França (FR)</option>
+              <option value="DE">Alemanha (DE)</option>
+            </select>
+            <button type="submit" class="btn btn-primary">Guardar região</button>
+          </form>
+          <p id="region-error" class="error" hidden></p>
+        </div>
+
+        <div class="settings-block">
+          <h3>Trocar PIN</h3>
+          <form id="changepin-form" class="add-form add-form-column" autocomplete="off">
+            <input id="changepin-new" type="password" inputmode="numeric" autocomplete="new-password"
+                   minlength="4" maxlength="12" required placeholder="Novo PIN (mín. 4 dígitos)">
+            <input id="changepin-new2" type="password" inputmode="numeric" autocomplete="new-password"
+                   minlength="4" maxlength="12" required placeholder="Confirmar novo PIN">
+            <button type="submit" class="btn btn-primary">Trocar PIN</button>
+          </form>
+          <p id="changepin-error" class="error" hidden></p>
+        </div>
+
+        <div class="settings-block">
+          <a class="back-link" href="/">← Voltar à app</a>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/admin.js"></script>
+</body>
+</html>
