@@ -217,12 +217,105 @@ a { color: inherit; text-decoration: none; }
   overflow: hidden;
 }
 
-.player iframe {
+.player { aspect-ratio: auto; }
+
+.player-frame {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  background: #000;
+}
+
+/* O iframe nunca recebe toques — impede qualquer clique para youtube.com. */
+.player-frame iframe {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   border: 0;
+  pointer-events: none;
+}
+
+.player-shield {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.player-bigplay {
+  width: 76px;
+  height: 76px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-left: 6px;
+  transition: opacity 0.25s;
+}
+
+.player-shield.is-playing .player-bigplay { opacity: 0; }
+.player-shield:not(.is-playing) .player-bigplay { opacity: 1; }
+
+.player-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--bg-raised);
+}
+
+.player-btn {
+  background: none;
+  border: 0;
+  color: var(--text);
+  font-size: 20px;
+  min-width: 44px;
+  min-height: 44px;
+  cursor: pointer;
+  touch-action: manipulation;
+  border-radius: 8px;
+}
+.player-btn:hover { background: rgba(255, 255, 255, 0.1); }
+
+.player-seek {
+  flex: 1 1 auto;
+  accent-color: var(--red);
+  min-height: 44px;
+}
+
+.player-clock {
+  font-size: 0.85rem;
+  color: var(--text-dim, #aaa);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.player.fs-fallback {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: #000;
+  border-radius: 0;
+  display: flex;
+  flex-direction: column;
+}
+.player.fs-fallback .player-frame { flex: 1 1 auto; aspect-ratio: auto; }
+
+.player-error {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim, #aaa);
+  padding: 20px;
+  text-align: center;
 }
 
 .watch-title {

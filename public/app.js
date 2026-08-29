@@ -234,14 +234,7 @@ async function viewWatch(id) {
     app.replaceChildren();
     const wrap = el('div', 'watch');
 
-    const player = el('div', 'player');
-    const iframe = document.createElement('iframe');
-    iframe.src = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(v.id)}?rel=0&playsinline=1`;
-    iframe.allow = 'accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture';
-    iframe.allowFullscreen = true;
-    iframe.title = v.title || 'Vídeo';
-    player.appendChild(iframe);
-    wrap.appendChild(player);
+    wrap.appendChild(buildPlayer(v.id));
 
     wrap.appendChild(el('h1', 'watch-title', v.title || ''));
 
@@ -297,7 +290,153 @@ async function viewChannel(id) {
 
 // ---------- Router por hash ----------
 
+// ---------------------------------------------------------------------------
+// Player controlado (YouTube IFrame API)
+//
+// O iframe do YouTube nunca recebe toques (pointer-events: none no CSS) — sem
+// título clicável, sem logo, sem "Ver no YouTube". Os controlos são nossos:
+// tocar no vídeo alterna play/pausa; barra de progresso e ecrã inteiro em baixo.
+// ---------------------------------------------------------------------------
+
+let ytApiPromise = null;
+
+function loadYouTubeApi() {
+  if (window.YT?.Player) return Promise.resolve();
+  if (!ytApiPromise) {
+    ytApiPromise = new Promise((resolve, reject) => {
+      const prev = window.onYouTubeIframeAPIReady;
+      window.onYouTubeIframeAPIReady = () => { prev?.(); resolve(); };
+      const s = document.createElement('script');
+      s.src = 'https://www.youtube.com/iframe_api';
+      s.onerror = () => reject(new Error('iframe_api falhou'));
+      document.head.appendChild(s);
+      setTimeout(() => reject(new Error('iframe_api demorou')), 10000);
+    }).catch((err) => {
+      ytApiPromise = null;
+      throw err;
+    });
+  }
+  return ytApiPromise;
+}
+
+let activePlayer = null; // { yt, timer }
+
+function destroyPlayer() {
+  if (!activePlayer) return;
+  clearInterval(activePlayer.timer);
+  try { activePlayer.yt?.destroy(); } catch { /* já removido do DOM */ }
+  activePlayer = null;
+}
+
+function formatClock(totalSeconds) {
+  const s = Math.max(0, Math.floor(totalSeconds || 0));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = String(s % 60).padStart(2, '0');
+  return h ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`;
+}
+
+function buildPlayer(videoId) {
+  const player = el('div', 'player');
+  const frame = el('div', 'player-frame');
+  const mount = el('div');
+  const shield = el('div', 'player-shield');
+  const bigPlay = el('div', 'player-bigplay', '▶');
+  shield.appendChild(bigPlay);
+  frame.append(mount, shield);
+
+  const controls = el('div', 'player-controls');
+  const playBtn = el('button', 'player-btn', '▶');
+  playBtn.type = 'button';
+  playBtn.setAttribute('aria-label', 'Reproduzir/pausar');
+  const seek = document.createElement('input');
+  seek.type = 'range';
+  seek.className = 'player-seek';
+  seek.min = '0';
+  seek.max = '100';
+  seek.step = '0.1';
+  seek.value = '0';
+  const clock = el('span', 'player-clock', '0:00 / 0:00');
+  const fsBtn = el('button', 'player-btn', '⛶');
+  fsBtn.type = 'button';
+  fsBtn.setAttribute('aria-label', 'Ecrã inteiro');
+  controls.append(playBtn, seek, clock, fsBtn);
+
+  player.append(frame, controls);
+
+  destroyPlayer();
+
+  // Vídeos do modo demonstração não existem no YouTube — placeholder em vez de player.
+  if (/^mock-/.test(videoId)) {
+    frame.replaceChildren(el('div', 'player-error',
+      'Vídeo de demonstração — a reprodução funciona com a chave API configurada.'));
+    return player;
+  }
+
+  loadYouTubeApi().then(() => {
+    if (!mount.isConnected) return; // já navegámos para outra página
+    const yt = new YT.Player(mount, {
+      videoId,
+      host: 'https://www.youtube-nocookie.com',
+      playerVars: {
+        controls: 0, rel: 0, playsinline: 1, disablekb: 1,
+        fs: 0, iv_load_policy: 3, autoplay: 1,
+      },
+      events: {
+        onReady: () => {
+          const timer = setInterval(() => {
+            if (!yt.getDuration) return;
+            const dur = yt.getDuration() || 0;
+            const cur = yt.getCurrentTime?.() || 0;
+            if (dur > 0 && !seek.matches(':active')) seek.value = String((cur / dur) * 100);
+            clock.textContent = `${formatClock(cur)} / ${formatClock(dur)}`;
+          }, 500);
+          activePlayer = { yt, timer };
+        },
+        onStateChange: (ev) => {
+          const playing = ev.data === YT.PlayerState.PLAYING;
+          playBtn.textContent = playing ? '❚❚' : '▶';
+          bigPlay.textContent = ev.data === YT.PlayerState.ENDED ? '↺' : '▶';
+          shield.classList.toggle('is-playing', playing);
+        },
+      },
+    });
+
+    const toggle = () => {
+      const state = yt.getPlayerState?.();
+      if (state === YT.PlayerState.PLAYING) yt.pauseVideo();
+      else if (state === YT.PlayerState.ENDED) yt.seekTo(0, true);
+      else yt.playVideo();
+    };
+    shield.addEventListener('click', toggle);
+    playBtn.addEventListener('click', toggle);
+    seek.addEventListener('input', () => {
+      const dur = yt.getDuration?.() || 0;
+      if (dur > 0) yt.seekTo((Number(seek.value) / 100) * dur, true);
+    });
+    fsBtn.addEventListener('click', () => {
+      const target = player;
+      if (document.fullscreenElement || document.webkitFullscreenElement) {
+        (document.exitFullscreen || document.webkitExitFullscreen)?.call(document);
+      } else if (target.requestFullscreen) {
+        target.requestFullscreen().catch(() => target.classList.toggle('fs-fallback'));
+      } else if (target.webkitRequestFullscreen) {
+        target.webkitRequestFullscreen();
+      } else {
+        target.classList.toggle('fs-fallback'); // iPad antigo: "ecrã inteiro" via CSS
+      }
+    });
+  }).catch((err) => {
+    console.error('player:', err);
+    frame.replaceChildren(el('div', 'player-error',
+      'Não foi possível carregar o vídeo. Verifica a ligação e tenta de novo.'));
+  });
+
+  return player;
+}
+
 function route() {
+  destroyPlayer();
   const hash = location.hash || '#home';
   const sep = hash.indexOf('/');
   const name = sep === -1 ? hash.slice(1) : hash.slice(1, sep);
