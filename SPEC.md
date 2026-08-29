@@ -37,6 +37,29 @@ recebe conteúdo bloqueado.
 }
 ```
 
+## Bloqueio: local (Node) vs. centralizado (GitHub Pages)
+
+As duas variantes divergem deliberadamente em ONDE vive a lista de bloqueio:
+
+- **Servidor Node** (`server/`): `blocked` vive em `data/config.json`, local à máquina.
+  Gerido pelas rotas `/api/admin/block/*` de sempre.
+- **Estática (GitHub Pages)**: `blocked` vive em **`blocklist.json` na raiz do repo**,
+  público, lido por todos os dispositivos via `raw.githubusercontent.com` (cache de 5 min
+  em memória + fallback em localStorage se a rede falhar). Isto é o que faz um bloqueio
+  feito num dispositivo valer em todos os outros com a app instalada.
+  - Leitura: `GET https://raw.githubusercontent.com/oliverbill/youtube-filter/main/blocklist.json`
+    — sem autenticação (repo público).
+  - Escrita: só a partir do painel admin, via `PUT /repos/oliverbill/youtube-filter/contents/blocklist.json`
+    (API do GitHub), autenticado com um token pessoal (fine-grained, scope `Contents: Read
+    and write` só neste repo) colado uma vez em `Definições` → fica em
+    `localStorage["kidtube-gh-token"]` **desse dispositivo**, nunca é publicado.
+  - `admin.js` decide qual caminho seguir via `window.__KIDTUBE_STATIC__` (definido só por
+    `static-api.js`) — `IS_STATIC` true usa GitHub, false usa as rotas `/api/admin/block/*`.
+  - O workflow de deploy ignora pushes que só tocam `blocklist.json` (`paths-ignore`) —
+    editar a lista não precisa de rebuild do site.
+  - Propagação não é instantânea: cache de 5 min no shim + cache do CDN do
+    `raw.githubusercontent.com` — contar alguns minutos, não segundos.
+
 ## Regras de filtragem (backend, aplicadas a QUALQUER lista de vídeos devolvida)
 
 Um vídeo é removido se:
@@ -102,7 +125,8 @@ MESMO pipeline de filtragem. `/api/status` devolve `"mock": true`. Thumbnails mo
   por baixo, grelha "Mais deste canal" (o campo `related`).
 - Se `/api/video/:id` devolve `blocked: true` → ecrã amigável "Este vídeo não está disponível".
 - Se query devolve `blockedQuery: true` → mensagem amigável.
-- Link discreto para `admin.html` no fundo (ícone engrenagem pequeno na topbar).
+- **Sem link nenhum para `admin.html`** — o painel é inacessível a partir da app (a
+  criança não tem caminho até lá); acede-se só digitando o URL diretamente.
 - Sem dependências externas; fetch à API relativa (`/api/...`).
 - Banner subtil quando `mock: true` ("Modo demonstração — configure a chave API").
 

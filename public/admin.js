@@ -5,9 +5,94 @@ const $ = (sel) => document.querySelector(sel);
 
 const PIN_KEY = 'kidtube-pin';
 
+// Definido por static-api.js (só existe na variante GitHub Pages). Nessa variante
+// o bloqueio não é local: vive em blocklist.json no GitHub, partilhado por todos
+// os dispositivos com a app instalada. No servidor Node continua tudo local.
+const IS_STATIC = typeof window.__KIDTUBE_STATIC__ !== 'undefined';
+
 const state = {
-  config: null, // { apiKeySet, blocked: {channels, keywords, videos}, region, safeSearch }
+  config: null, // { apiKeySet, blocked: {channels, keywords, videos}, safeSearch }
 };
+
+// ---------------------------------------------------------------------------
+// Bloqueio centralizado no GitHub (só na variante estática)
+// ---------------------------------------------------------------------------
+
+const GH_OWNER = 'oliverbill';
+const GH_REPO = 'youtube-filter';
+const GH_PATH = 'blocklist.json';
+const GH_BRANCH = 'main';
+const GH_TOKEN_KEY = 'kidtube-gh-token';
+
+function ghToken() {
+  return localStorage.getItem(GH_TOKEN_KEY) || '';
+}
+
+function setGhToken(token) {
+  if (token) localStorage.setItem(GH_TOKEN_KEY, token);
+  else localStorage.removeItem(GH_TOKEN_KEY);
+}
+
+// Leitura é sempre pública (repo público) — não precisa de token.
+async function ghReadBlocklist() {
+  const res = await fetch(
+    `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${GH_PATH}?ref=${GH_BRANCH}`,
+    { headers: { Accept: 'application/vnd.github+json' }, cache: 'no-store' },
+  );
+  if (!res.ok) throw new Error(`Não consegui ler o blocklist.json do GitHub (${res.status}).`);
+  const data = await res.json();
+  const decoded = decodeURIComponent(escape(atob(data.content.replace(/\n/g, ''))));
+  const parsed = JSON.parse(decoded);
+  return {
+    sha: data.sha,
+    blocked: {
+      channels: Array.isArray(parsed.channels) ? parsed.channels : [],
+      keywords: Array.isArray(parsed.keywords) ? parsed.keywords : [],
+      videos: Array.isArray(parsed.videos) ? parsed.videos : [],
+    },
+  };
+}
+
+// Escrita exige o token pessoal guardado neste dispositivo (nunca sai daqui).
+async function ghWriteBlocklist(blocked, sha, message) {
+  const token = ghToken();
+  if (!token) throw new Error('Cola o token do GitHub em Definições antes de gravar.');
+  const body = {
+    message,
+    branch: GH_BRANCH,
+    sha,
+    content: btoa(unescape(encodeURIComponent(JSON.stringify(blocked, null, 2) + '\n'))),
+  };
+  const res = await fetch(
+    `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${GH_PATH}`,
+    {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/vnd.github+json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    },
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    if (res.status === 401 || res.status === 403) {
+      throw new Error('Token do GitHub inválido ou sem permissão de escrita neste repositório.');
+    }
+    if (res.status === 409) throw new Error('O blocklist.json mudou entretanto — tenta outra vez.');
+    throw new Error(err.message || `O GitHub recusou a gravação (${res.status}).`);
+  }
+}
+
+// Lê o ficheiro mais recente, aplica a mutação e grava — evita conflitos de sha
+// quando duas pessoas editam quase ao mesmo tempo.
+async function mutateBlocklist(mutate, message) {
+  const { blocked, sha } = await ghReadBlocklist();
+  mutate(blocked);
+  await ghWriteBlocklist(blocked, sha, message);
+  return blocked;
+}
 
 // ---------------------------------------------------------------------------
 // Pedidos à API
@@ -184,6 +269,7 @@ async function boot() {
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js').catch(() => { /* PWA opcional */ });
   }
+  if (!IS_STATIC) $('#ghtoken-block')?.remove();
   let status;
   try {
     status = await api('GET', '/api/status', undefined, { noPin: true });
@@ -267,10 +353,23 @@ document.querySelectorAll('.tab').forEach((btn) => {
 // ---------------------------------------------------------------------------
 
 async function refreshConfig() {
-  const cfg = await api('GET', '/api/admin/config');
-  state.config = cfg;
+  if (IS_STATIC) {
+    const { blocked } = await ghReadBlocklist();
+    state.config = { blocked };
+  } else {
+    state.config = await api('GET', '/api/admin/config');
+  }
   renderLists();
   renderSettings();
+  renderGhTokenStatus();
+}
+
+function renderGhTokenStatus() {
+  const status = $('#ghtoken-status');
+  if (!status) return; // servidor Node: bloco do token nem existe
+  status.textContent = ghToken()
+    ? 'Token configurado neste dispositivo ✓ — cole outro para o substituir.'
+    : 'Sem token — os bloqueios não podem ser gravados a partir deste dispositivo.';
 }
 
 function renderList(listSel, emptySel, items, renderItem, onRemove) {
@@ -312,14 +411,22 @@ function renderLists() {
     id.className = 'item-id';
     id.textContent = ch.id;
     el.append(t, id);
-  }, (ch) => api('DELETE', `/api/admin/block/channel/${encodeURIComponent(ch.id)}`));
+  }, (ch) => IS_STATIC
+    ? mutateBlocklist((bl) => {
+        bl.channels = bl.channels.filter((c) => c.id !== ch.id);
+      }, `Desbloquear canal: ${ch.title || ch.id}`)
+    : api('DELETE', `/api/admin/block/channel/${encodeURIComponent(ch.id)}`));
 
   renderList('#keyword-list', '#keyword-empty', b.keywords || [], (el, kw) => {
     const t = document.createElement('span');
     t.className = 'item-title';
     t.textContent = kw;
     el.append(t);
-  }, (kw) => api('DELETE', `/api/admin/block/keyword/${encodeURIComponent(kw)}`));
+  }, (kw) => IS_STATIC
+    ? mutateBlocklist((bl) => {
+        bl.keywords = bl.keywords.filter((k) => k !== kw);
+      }, `Desbloquear tema: ${kw}`)
+    : api('DELETE', `/api/admin/block/keyword/${encodeURIComponent(kw)}`));
 
   renderList('#video-list', '#video-empty', b.videos || [], (el, v) => {
     const t = document.createElement('span');
@@ -329,7 +436,11 @@ function renderLists() {
     id.className = 'item-id';
     id.textContent = v.id;
     el.append(t, id);
-  }, (v) => api('DELETE', `/api/admin/block/video/${encodeURIComponent(v.id)}`));
+  }, (v) => IS_STATIC
+    ? mutateBlocklist((bl) => {
+        bl.videos = bl.videos.filter((vd) => vd.id !== v.id);
+      }, `Desbloquear vídeo: ${v.title || v.id}`)
+    : api('DELETE', `/api/admin/block/video/${encodeURIComponent(v.id)}`));
 }
 
 function renderSettings() {
@@ -366,7 +477,13 @@ function hideSuggest() {
 }
 
 async function blockChannelEntry(id, title) {
-  await api('POST', '/api/admin/block/channel', { id, title });
+  if (IS_STATIC) {
+    await mutateBlocklist((bl) => {
+      if (!bl.channels.some((c) => c.id === id)) bl.channels.push({ id, title: title || '' });
+    }, `Bloquear canal: ${title || id}`);
+  } else {
+    await api('POST', '/api/admin/block/channel', { id, title });
+  }
   $('#channel-form').reset();
   hideSuggest();
   await refreshConfig();
@@ -449,10 +566,7 @@ $('#channel-form').addEventListener('submit', async (ev) => {
       if (!found) showError('#channel-error', 'Não encontrei canais com esse nome.');
       return;
     }
-    await api('POST', '/api/admin/block/channel', { id, title });
-    $('#channel-form').reset();
-    await refreshConfig();
-    flash('Canal bloqueado.');
+    await blockChannelEntry(id, title);
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) return;
     showError('#channel-error', err.message);
@@ -465,7 +579,13 @@ $('#keyword-form').addEventListener('submit', async (ev) => {
   const keyword = $('#keyword-input').value.trim();
   if (!keyword) return;
   try {
-    await api('POST', '/api/admin/block/keyword', { keyword });
+    if (IS_STATIC) {
+      await mutateBlocklist((bl) => {
+        if (!bl.keywords.includes(keyword)) bl.keywords.push(keyword);
+      }, `Bloquear tema: ${keyword}`);
+    } else {
+      await api('POST', '/api/admin/block/keyword', { keyword });
+    }
     $('#keyword-form').reset();
     await refreshConfig();
     flash('Tema bloqueado.');
@@ -481,7 +601,13 @@ $('#video-form').addEventListener('submit', async (ev) => {
   try {
     const id = extractVideoId($('#video-input').value);
     const title = $('#video-title').value.trim();
-    await api('POST', '/api/admin/block/video', { id, title });
+    if (IS_STATIC) {
+      await mutateBlocklist((bl) => {
+        if (!bl.videos.some((v) => v.id === id)) bl.videos.push({ id, title: title || '' });
+      }, `Bloquear vídeo: ${title || id}`);
+    } else {
+      await api('POST', '/api/admin/block/video', { id, title });
+    }
     $('#video-form').reset();
     await refreshConfig();
     flash('Vídeo bloqueado.');
@@ -514,6 +640,20 @@ $('#apikey-form')?.addEventListener('submit', async (ev) => {
   }
 });
 
+
+$('#ghtoken-form')?.addEventListener('submit', (ev) => {
+  ev.preventDefault();
+  showError('#ghtoken-error', '');
+  const token = $('#ghtoken-input').value.trim();
+  if (!token) {
+    showError('#ghtoken-error', 'Cola o token antes de guardar.');
+    return;
+  }
+  setGhToken(token);
+  $('#ghtoken-form').reset();
+  renderGhTokenStatus();
+  flash('Token do GitHub guardado neste dispositivo.');
+});
 
 $('#changepin-form').addEventListener('submit', async (ev) => {
   ev.preventDefault();

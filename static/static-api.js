@@ -12,8 +12,13 @@
 // - PIN: SHA-256 hex via crypto.subtle (em vez de scrypt — não há scrypt no browser).
 // - Sem apiKey → modo mock (catálogo de server/mockdata.js, thumbnails em data URI SVG).
 // - Com apiKey → YouTube Data API v3 diretamente do browser (suporta CORS).
+// - Bloqueios (canais/temas/vídeos) NÃO são locais: vêm de blocklist.json no GitHub,
+//   partilhado por todos os dispositivos. O painel admin.js grava lá diretamente via
+//   API do GitHub (usa um token próprio, guardado só no localStorage desse aparelho).
 
 (() => {
+  window.__KIDTUBE_STATIC__ = true; // admin.js usa isto para saber que fala com este shim.
+
   const originalFetch = window.fetch.bind(window);
 
   // ---------- Config em localStorage ----------
@@ -33,22 +38,11 @@
   const DEFAULTS = {
     apiKey: '',
     pinHash: null, // SHA-256 hex; null = PIN ainda não definido
-    blocked: {
-      channels: [],
-      keywords: [],
-      videos: [],
-    },
     safeSearch: 'strict',
   };
 
   function deepMergeDefaults(cfg) {
-    const out = { ...DEFAULTS, ...cfg };
-    out.blocked = {
-      channels: Array.isArray(cfg?.blocked?.channels) ? cfg.blocked.channels : [],
-      keywords: Array.isArray(cfg?.blocked?.keywords) ? cfg.blocked.keywords : [],
-      videos: Array.isArray(cfg?.blocked?.videos) ? cfg.blocked.videos : [],
-    };
-    return out;
+    return { ...DEFAULTS, ...cfg };
   }
 
   function getConfig() {
@@ -179,6 +173,63 @@
     mv('mock-020', 3, 'Boa Noite, Estrelinha (canção de embalar)', 'Uma canção suave para adormecer.', '5:03', '2026-05-08T09:00:00Z', '1450998'),
   ];
 
+  // ---------- Bloqueio centralizado (blocklist.json no GitHub, partilhado) ----------
+
+  const BLOCKLIST_OWNER = 'oliverbill';
+  const BLOCKLIST_REPO = 'youtube-filter';
+  const BLOCKLIST_BRANCH = 'main';
+  const BLOCKLIST_URL =
+    `https://raw.githubusercontent.com/${BLOCKLIST_OWNER}/${BLOCKLIST_REPO}/${BLOCKLIST_BRANCH}/blocklist.json`;
+  const BLOCKLIST_TTL_MS = 5 * 60 * 1000;
+  const BLOCKLIST_CACHE_KEY = 'kidtube-blocklist-cache';
+  const EMPTY_BLOCKLIST = { channels: [], keywords: [], videos: [] };
+
+  let blocklistMem = null; // { at, data }
+
+  function normalizeBlocklistShape(data) {
+    return {
+      channels: Array.isArray(data?.channels) ? data.channels : [],
+      keywords: Array.isArray(data?.keywords) ? data.keywords : [],
+      videos: Array.isArray(data?.videos) ? data.videos : [],
+    };
+  }
+
+  function readBlocklistCacheFromStorage() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(BLOCKLIST_CACHE_KEY));
+      if (raw?.data) return raw;
+    } catch { /* ignora cache corrompida */ }
+    return null;
+  }
+
+  function writeBlocklistCacheToStorage(data) {
+    try {
+      localStorage.setItem(BLOCKLIST_CACHE_KEY, JSON.stringify({ at: Date.now(), data }));
+    } catch { /* localStorage indisponível/cheio: cache fica só em memória */ }
+  }
+
+  // Lê blocklist.json diretamente do GitHub (raw, público, sem autenticação, com
+  // CORS). Cache em memória de 5 min; se a rede falhar usa o último valor
+  // conhecido (memória ou localStorage) em vez de abrir tudo silenciosamente.
+  async function getBlocklist() {
+    if (blocklistMem && Date.now() - blocklistMem.at < BLOCKLIST_TTL_MS) return blocklistMem.data;
+    try {
+      const res = await originalFetch(BLOCKLIST_URL, { cache: 'no-store' });
+      if (!res.ok) throw new Error(`blocklist.json ${res.status}`);
+      const data = normalizeBlocklistShape(await res.json());
+      blocklistMem = { at: Date.now(), data };
+      writeBlocklistCacheToStorage(data);
+      return data;
+    } catch {
+      const fallback = blocklistMem?.data ? blocklistMem : readBlocklistCacheFromStorage();
+      if (fallback) {
+        blocklistMem = { at: Date.now(), data: fallback.data };
+        return fallback.data;
+      }
+      return EMPTY_BLOCKLIST;
+    }
+  }
+
   // ---------- Normalização / filtragem (idêntico a server/youtube.js) ----------
 
   function normalize(s) {
@@ -188,8 +239,7 @@
       .replace(/[\u0300-\u036f]/g, '');
   }
 
-  function isBlocked(video) {
-    const { blocked } = getConfig();
+  function isBlocked(video, blocked) {
     if (blocked.channels.some((c) => c.id === video.channelId)) return true;
     if (blocked.videos.some((v) => v.id === video.id)) return true;
     const tags = Array.isArray(video.tags) ? video.tags.join('\n') : '';
@@ -199,18 +249,16 @@
     return blocked.keywords.some((kw) => haystack.includes(normalize(kw)));
   }
 
-  function filterVideos(videos) {
-    return videos.filter((v) => !isBlocked(v));
+  function filterVideos(videos, blocked) {
+    return videos.filter((v) => !isBlocked(v, blocked));
   }
 
-  function isQueryBlocked(q) {
-    const { blocked } = getConfig();
+  function isQueryBlocked(q, blocked) {
     const nq = normalize(q);
     return blocked.keywords.some((kw) => nq.includes(normalize(kw)));
   }
 
-  function isChannelBlocked(channelId) {
-    const { blocked } = getConfig();
+  function isChannelBlocked(channelId, blocked) {
     return blocked.channels.some((c) => c.id === channelId);
   }
 
@@ -347,11 +395,13 @@
       });
       videos = (data.items || []).map((it) => videoFromSnippet(it.id, it.snippet, it));
     }
-    return filterVideos(videos).map(stripDescription);
+    const blocked = await getBlocklist();
+    return filterVideos(videos, blocked).map(stripDescription);
   }
 
   async function search(q) {
-    if (isQueryBlocked(q)) return { blockedQuery: true, items: [] };
+    const blocked = await getBlocklist();
+    if (isQueryBlocked(q, blocked)) return { blockedQuery: true, items: [] };
     const cfg = getConfig();
     let videos;
     if (usingMock()) {
@@ -372,7 +422,7 @@
         .map((it) => videoFromSnippet(it.id.videoId, it.snippet, null));
       videos = await enrich(videos);
     }
-    return { blockedQuery: false, items: filterVideos(videos).map(stripDescription) };
+    return { blockedQuery: false, items: filterVideos(videos, blocked).map(stripDescription) };
   }
 
   async function channelUploads(channelId) {
@@ -407,7 +457,8 @@
       if (item) video = videoFromSnippet(item.id, item.snippet, item);
     }
     if (!video) return { video: null, blocked: false, related: [] };
-    if (isBlocked(video)) return { video: null, blocked: true, related: [] };
+    const blocked = await getBlocklist();
+    if (isBlocked(video, blocked)) return { video: null, blocked: true, related: [] };
 
     // Relacionados: outros vídeos do MESMO canal (playlist de uploads), filtrados.
     let related = [];
@@ -416,12 +467,13 @@
     } catch {
       related = [];
     }
-    related = filterVideos(related.filter((v) => v.id !== id)).map(stripDescription);
+    related = filterVideos(related.filter((v) => v.id !== id), blocked).map(stripDescription);
     return { video: stripDescription(video), blocked: false, related };
   }
 
   async function channel(channelId) {
-    if (isChannelBlocked(channelId)) {
+    const blocked = await getBlocklist();
+    if (isChannelBlocked(channelId, blocked)) {
       return { channel: { id: channelId, title: '' }, items: [], blocked: true };
     }
     let title = '';
@@ -431,7 +483,7 @@
       const ch = await apiGet('/channels', { part: 'snippet', id: channelId });
       title = ch.items?.[0]?.snippet?.title || '';
     }
-    const items = filterVideos(await channelUploads(channelId)).map(stripDescription);
+    const items = filterVideos(await channelUploads(channelId), blocked).map(stripDescription);
     return { channel: { id: channelId, title }, items, blocked: false };
   }
 
@@ -451,48 +503,9 @@
     saveConfig(cfg);
   }
 
-  function blockChannel(id, title) {
-    const cfg = getConfig();
-    if (!cfg.blocked.channels.some((c) => c.id === id)) {
-      cfg.blocked.channels.push({ id, title: String(title || '') });
-      saveConfig(cfg);
-    }
-  }
-
-  function unblockChannel(id) {
-    const cfg = getConfig();
-    cfg.blocked.channels = cfg.blocked.channels.filter((c) => c.id !== id);
-    saveConfig(cfg);
-  }
-
-  function blockKeyword(keyword) {
-    const cfg = getConfig();
-    const kw = String(keyword || '').trim();
-    if (kw && !cfg.blocked.keywords.includes(kw)) {
-      cfg.blocked.keywords.push(kw);
-      saveConfig(cfg);
-    }
-  }
-
-  function unblockKeyword(keyword) {
-    const cfg = getConfig();
-    cfg.blocked.keywords = cfg.blocked.keywords.filter((k) => k !== keyword);
-    saveConfig(cfg);
-  }
-
-  function blockVideo(id, title) {
-    const cfg = getConfig();
-    if (!cfg.blocked.videos.some((vd) => vd.id === id)) {
-      cfg.blocked.videos.push({ id, title: String(title || '') });
-      saveConfig(cfg);
-    }
-  }
-
-  function unblockVideo(id) {
-    const cfg = getConfig();
-    cfg.blocked.videos = cfg.blocked.videos.filter((vd) => vd.id !== id);
-    saveConfig(cfg);
-  }
+  // Mutações de bloqueio deixaram de existir aqui: admin.js grava diretamente
+  // no blocklist.json do GitHub via API (ver ghReadBlocklist/ghWriteBlocklist
+  // em admin.js), para o bloqueio valer em todos os dispositivos.
 
   // ---------- Router /api/ ----------
 
@@ -598,7 +611,6 @@
           const cfg = getConfig();
           return json({
             apiKeySet: !!effectiveApiKey(cfg),
-            blocked: cfg.blocked,
             safeSearch: cfg.safeSearch,
           });
         }
@@ -611,36 +623,8 @@
           cache.clear();
           return json({ ok: true });
         }
-        if (method === 'POST' && pathname === '/api/admin/block/channel') {
-          const body = await getBody(input, init);
-          if (!body.id) return json({ error: 'id em falta' }, 400);
-          blockChannel(String(body.id), body.title);
-          return json({ ok: true });
-        }
-        if (method === 'DELETE' && (m = /^\/api\/admin\/block\/channel\/([^/]+)$/.exec(pathname))) {
-          unblockChannel(decodeURIComponent(m[1]));
-          return json({ ok: true });
-        }
-        if (method === 'POST' && pathname === '/api/admin/block/keyword') {
-          const body = await getBody(input, init);
-          if (!String(body.keyword || '').trim()) return json({ error: 'keyword em falta' }, 400);
-          blockKeyword(body.keyword);
-          return json({ ok: true });
-        }
-        if (method === 'DELETE' && (m = /^\/api\/admin\/block\/keyword\/(.+)$/.exec(pathname))) {
-          unblockKeyword(decodeURIComponent(m[1]));
-          return json({ ok: true });
-        }
-        if (method === 'POST' && pathname === '/api/admin/block/video') {
-          const body = await getBody(input, init);
-          if (!body.id) return json({ error: 'id em falta' }, 400);
-          blockVideo(String(body.id), body.title);
-          return json({ ok: true });
-        }
-        if (method === 'DELETE' && (m = /^\/api\/admin\/block\/video\/([^/]+)$/.exec(pathname))) {
-          unblockVideo(decodeURIComponent(m[1]));
-          return json({ ok: true });
-        }
+        // Bloqueio de canais/temas/vídeos: ver ghReadBlocklist/ghWriteBlocklist em
+        // admin.js — grava diretamente no GitHub, não passa por aqui.
       }
 
       return json({ error: 'Não encontrado' }, 404);

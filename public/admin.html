@@ -132,6 +132,28 @@
           <p id="apikey-error" class="error" hidden></p>
         </div>
 
+        <!-- Só existe na variante estática (GitHub Pages); admin.js remove-o
+             no servidor Node, onde o bloqueio é local. -->
+        <div class="settings-block" id="ghtoken-block">
+          <h3>Token do GitHub</h3>
+          <p class="hint">
+            Necessário para gravar bloqueios (aplicam-se a todos os dispositivos).
+            Cria um em
+            <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">
+              github.com/settings/personal-access-tokens/new</a>
+            com acesso só ao repositório <code>youtube-filter</code> e permissão
+            <strong>Contents: Read and write</strong>. Fica guardado só neste
+            dispositivo, nunca é publicado.
+          </p>
+          <p id="ghtoken-status" class="hint"></p>
+          <form id="ghtoken-form" class="add-form" autocomplete="off">
+            <input id="ghtoken-input" type="password" autocomplete="off"
+                   placeholder="Colar token (github_pat_…)">
+            <button type="submit" class="btn btn-primary">Guardar token</button>
+          </form>
+          <p id="ghtoken-error" class="error" hidden></p>
+        </div>
+
         <div class="settings-block">
           <h3>Trocar PIN</h3>
           <form id="changepin-form" class="add-form add-form-column" autocomplete="off">

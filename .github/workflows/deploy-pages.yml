@@ -3,6 +3,10 @@ name: Deploy GitHub Pages
 on:
   push:
     branches: [main]
+    # blocklist.json é lido diretamente via raw.githubusercontent.com pela app —
+    # editá-lo não precisa de rebuild/redeploy do site.
+    paths-ignore:
+      - 'blocklist.json'
   workflow_dispatch:
 
 permissions:
