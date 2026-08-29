@@ -144,7 +144,6 @@ async function home() {
     const data = await apiGet('/videos', {
       part: 'snippet,contentDetails,statistics',
       chart: 'mostPopular',
-      regionCode: cfg.region,
       maxResults: 30,
     });
     videos = (data.items || []).map((it) => videoFromSnippet(it.id, it.snippet, it));
@@ -168,7 +167,6 @@ async function search(q) {
       q,
       maxResults: 25,
       safeSearch: cfg.safeSearch,
-      regionCode: cfg.region,
     });
     videos = (data.items || [])
       .filter((it) => it.id?.videoId)

@@ -20,6 +20,16 @@
 
   const STORAGE_KEY = 'kidtube-config';
 
+  // Chave fixa injetada no deploy: o workflow do GitHub Actions substitui o
+  // placeholder pelo secret YOUTUBE_API_KEY. No repo fica só o placeholder.
+  const INJECTED_API_KEY_TOKEN = '__KIDTUBE_API_KEY__';
+  const INJECTED_API_KEY = /^__KIDTUBE/.test(INJECTED_API_KEY_TOKEN) ? '' : INJECTED_API_KEY_TOKEN;
+
+  // A chave colada na administração (localStorage) tem prioridade sobre a injetada.
+  function effectiveApiKey(cfg) {
+    return cfg.apiKey || INJECTED_API_KEY;
+  }
+
   const DEFAULTS = {
     apiKey: '',
     pinHash: null, // SHA-256 hex; null = PIN ainda não definido
@@ -28,7 +38,6 @@
       keywords: [],
       videos: [],
     },
-    region: 'PT',
     safeSearch: 'strict',
   };
 
@@ -219,7 +228,7 @@
     for (const [k, v] of Object.entries(params)) {
       if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, String(v));
     }
-    url.searchParams.set('key', cfg.apiKey);
+    url.searchParams.set('key', effectiveApiKey(cfg));
     const key = url.toString();
 
     const hit = cache.get(key);
@@ -290,7 +299,7 @@
   // ---------- Operações públicas (mock-aware; TODAS filtradas) ----------
 
   function usingMock() {
-    return !getConfig().apiKey;
+    return !effectiveApiKey(getConfig());
   }
 
   async function home() {
@@ -302,7 +311,6 @@
       const data = await apiGet('/videos', {
         part: 'snippet,contentDetails,statistics',
         chart: 'mostPopular',
-        regionCode: cfg.region,
         maxResults: 30,
       });
       videos = (data.items || []).map((it) => videoFromSnippet(it.id, it.snippet, it));
@@ -326,7 +334,6 @@
         q,
         maxResults: 25,
         safeSearch: cfg.safeSearch,
-        regionCode: cfg.region,
       });
       videos = (data.items || [])
         .filter((it) => it.id?.videoId)
@@ -409,12 +416,6 @@
   function setApiKey(apiKey) {
     const cfg = getConfig();
     cfg.apiKey = String(apiKey || '');
-    saveConfig(cfg);
-  }
-
-  function setRegion(region) {
-    const cfg = getConfig();
-    cfg.region = String(region || 'PT').toUpperCase();
     saveConfig(cfg);
   }
 
@@ -530,7 +531,7 @@
       if (method === 'GET' && pathname === '/api/status') {
         const cfg = getConfig();
         return json({
-          hasApiKey: !!cfg.apiKey,
+          hasApiKey: !!effectiveApiKey(cfg),
           hasPin: cfg.pinHash !== null,
           mock: usingMock(),
           static: true,
@@ -564,9 +565,8 @@
         if (method === 'GET' && pathname === '/api/admin/config') {
           const cfg = getConfig();
           return json({
-            apiKeySet: !!cfg.apiKey,
+            apiKeySet: !!effectiveApiKey(cfg),
             blocked: cfg.blocked,
-            region: cfg.region,
             safeSearch: cfg.safeSearch,
           });
         }
@@ -574,11 +574,6 @@
           const body = await getBody(input, init);
           setApiKey(body.apiKey);
           cache.clear();
-          return json({ ok: true });
-        }
-        if (method === 'POST' && pathname === '/api/admin/region') {
-          const body = await getBody(input, init);
-          setRegion(body.region);
           return json({ ok: true });
         }
         if (method === 'POST' && pathname === '/api/admin/block/channel') {

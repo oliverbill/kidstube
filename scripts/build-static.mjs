@@ -34,7 +34,11 @@ rewrite('admin.html', [relAttrs, injectShim('admin.js')]);
 for (const f of ['app.js', 'admin.js'])
   rewrite(f, [(s) => s.replace(/register\('\/sw\.js'\)/g, "register('./sw.js')")]);
 
+// Cada deploy ganha um cache novo no service worker, senão os clientes ficam
+// presos ao shim antigo (e à chave antiga) até alguém bumpar a versão à mão.
+const buildId = process.env.KIDTUBE_BUILD_ID || 'dev';
 rewrite('sw.js', [(s) => s
+  .replace(/const CACHE_VERSION = '[^']+';/, `const CACHE_VERSION = 'kidtube-${buildId.slice(0, 12)}';`)
   .replace(/'\/(admin|app|index|icons|manifest|sw)/g, "'./$1")
   .replace(/'\/'/g, "'./'")
   .replace("'./app.js',", "'./app.js',\n  './static-api.js',")

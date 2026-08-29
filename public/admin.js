@@ -335,7 +335,6 @@ function renderSettings() {
   } else {
     status.textContent = 'Sem chave configurada — a app está em modo demonstração.';
   }
-  $('#region-select').value = cfg.region || 'PT';
 }
 
 // ---------------------------------------------------------------------------
@@ -413,18 +412,6 @@ $('#apikey-form').addEventListener('submit', async (ev) => {
   }
 });
 
-$('#region-form').addEventListener('submit', async (ev) => {
-  ev.preventDefault();
-  showError('#region-error', '');
-  try {
-    await api('POST', '/api/admin/region', { region: $('#region-select').value });
-    await refreshConfig();
-    flash('Região guardada.');
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 401) return;
-    showError('#region-error', err.message);
-  }
-});
 
 $('#changepin-form').addEventListener('submit', async (ev) => {
   ev.preventDefault();

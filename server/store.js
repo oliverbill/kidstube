@@ -18,7 +18,6 @@ const DEFAULTS = {
     keywords: [],
     videos: [],
   },
-  region: 'PT',
   safeSearch: 'strict',
 };
 
@@ -120,12 +119,6 @@ function setApiKey(apiKey) {
   save();
 }
 
-function setRegion(region) {
-  const cfg = load();
-  cfg.region = String(region || 'PT').toUpperCase();
-  save();
-}
-
 // ---------- Blocklist ----------
 
 function blockChannel(id, title) {
@@ -181,7 +174,6 @@ module.exports = {
   verifyPin,
   pinLockedForMs,
   setApiKey,
-  setRegion,
   blockChannel,
   unblockChannel,
   blockKeyword,

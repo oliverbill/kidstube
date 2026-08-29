@@ -35,7 +35,11 @@ Servidor em `http://<ip-do-mac>:8478`. Sem dependências npm — só Node ≥ 18
 
 ## Variante estática (GitHub Pages)
 
-`docs/` contém uma versão 100% estática, montada por `node scripts/build-static.mjs`:
+O deploy é feito pelo workflow `.github/workflows/deploy-pages.yml` a cada push no `main`:
+monta o site com `node scripts/build-static.mjs` e injeta a chave fixa a partir do secret
+`YOUTUBE_API_KEY` do repositório (`gh secret set YOUTUBE_API_KEY`) — os dispositivos não
+precisam de colar chave nenhuma; uma chave colada na administração sobrepõe-se à fixa.
+O `docs/` é gerado no CI (está no .gitignore); a versão estática:
 o `static-api.js` implementa a API no próprio browser (YouTube API direta + listas e PIN em
 `localStorage`). Serve para publicar em https://oliverbill.github.io/youtube-filter/ — mas o
 filtro passa a correr **no cliente**: num iPad de criança é eficaz na prática, mas quem tiver

@@ -33,7 +33,6 @@ recebe conteúdo bloqueado.
     "keywords": [ "minecraft", "arma" ],
     "videos":   [ {"id": "abc123", "title": "Título do vídeo"} ]
   },
-  "region": "PT",
   "safeSearch": "strict"
 }
 ```
@@ -53,7 +52,7 @@ se contiver keyword bloqueada → responde `{"blockedQuery": true, "items": []}`
 
 ### Público (app da criança)
 
-- `GET /api/home` → vídeos populares da região (mostPopular). Resp: `{"items": [Video]}`
+- `GET /api/home` → vídeos populares (mostPopular, sem regionCode — comportamento global da API). Resp: `{"items": [Video]}`
 - `GET /api/search?q=...` → pesquisa (type=video, safeSearch). Resp: `{"items": [Video], "blockedQuery": false}`
 - `GET /api/video/:id` → detalhes + relacionados **do mesmo canal** (playlist de uploads do canal, filtrada).
   Resp: `{"video": Video|null, "blocked": false, "related": [Video]}` — se bloqueado: `{"blocked": true}` e `video: null`, `related: []`.
@@ -74,12 +73,11 @@ faz batch `videos.list` para preencher quando possível.)
 - `POST /api/admin/pin` body `{"pin": "1234"}` — define PIN. Só permitido se `pinHash` é null
   (primeira vez) OU header X-Pin válido (troca).
 - `POST /api/admin/verify` body `{}` + header — `{"ok": true}` ou 401.
-- `GET  /api/admin/config` → config sem apiKey em claro: `{"apiKeySet": bool, "blocked": {...}, "region", "safeSearch"}`
+- `GET  /api/admin/config` → config sem apiKey em claro: `{"apiKeySet": bool, "blocked": {...}, "safeSearch"}`
 - `POST /api/admin/apikey` body `{"apiKey": "..."}`
 - `POST /api/admin/block/channel` body `{"id","title"}` ; `DELETE /api/admin/block/channel/:id`
 - `POST /api/admin/block/keyword` body `{"keyword"}` ; `DELETE /api/admin/block/keyword/:kw` (kw URL-encoded)
 - `POST /api/admin/block/video` body `{"id","title"}` ; `DELETE /api/admin/block/video/:id`
-- `POST /api/admin/region` body `{"region": "PT"}`
 
 401 em X-Pin inválido/ausente. Rate-limit de verificação de PIN: após 5 falhas seguidas,
 recusar por 60s (`429`).
@@ -109,7 +107,7 @@ MESMO pipeline de filtragem. `/api/status` devolve `"mock": true`. Thumbnails mo
 - `admin.html`: ecrã de PIN primeiro (definir na 1ª vez — `/api/status.hasPin` —, pedir depois);
   PIN guardado em `sessionStorage` enquanto a sessão dura, enviado como X-Pin.
 - Tabs: **Canais bloqueados**, **Temas (palavras-chave)**, **Vídeos bloqueados**, **Definições**
-  (API key, região, trocar PIN).
+  (API key, trocar PIN).
 - Cada tab: lista atual com botão remover + form de adicionar. Para canais/vídeos, aceitar
   colar URL do YouTube e extrair o id no cliente (padrões `youtube.com/watch?v=`, `youtu.be/`,
   `youtube.com/channel/UC...`, `@handle` → nesse caso guardar como keyword? NÃO: se não der

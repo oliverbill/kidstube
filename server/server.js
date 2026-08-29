@@ -236,7 +236,6 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, {
       apiKeySet: Boolean(cfg.apiKey),
       blocked: cfg.blocked,
-      region: cfg.region,
       safeSearch: cfg.safeSearch,
     });
   }
@@ -244,14 +243,6 @@ async function handleApi(req, res, url) {
   if (method === 'POST' && p === '/api/admin/apikey') {
     const body = await readBody(req);
     store.setApiKey(body.apiKey);
-    return sendJson(res, 200, { ok: true });
-  }
-
-  if (method === 'POST' && p === '/api/admin/region') {
-    const body = await readBody(req);
-    const region = String(body.region || '').trim();
-    if (!/^[A-Za-z]{2}$/.test(region)) return sendError(res, 400, 'Região inválida.');
-    store.setRegion(region);
     return sendJson(res, 200, { ok: true });
   }
 
