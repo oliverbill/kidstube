@@ -28,8 +28,15 @@ const relAttrs = (s) => s
 const injectShim = (name) => (s) =>
   s.replace(new RegExp(`<script src="\\.?/?${name}"`), `<script src="./static-api.js"></script>\n  <script src="./${name}"`);
 
+// Na variante estática a chave vem fixa do deploy — o bloco de a configurar sai.
+const dropApikeyBlock = (s) => {
+  const out = s.replace(/[ \t]*<div class="settings-block" id="apikey-block">[\s\S]*?<\/div>\n/, '');
+  if (out === s) throw new Error('bloco apikey-block não encontrado em admin.html');
+  return out;
+};
+
 rewrite('index.html', [relAttrs, injectShim('app.js')]);
-rewrite('admin.html', [relAttrs, injectShim('admin.js')]);
+rewrite('admin.html', [relAttrs, dropApikeyBlock, injectShim('admin.js')]);
 
 for (const f of ['app.js', 'admin.js'])
   rewrite(f, [(s) => s.replace(/register\('\/sw\.js'\)/g, "register('./sw.js')")]);

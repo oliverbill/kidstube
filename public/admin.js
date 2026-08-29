@@ -167,6 +167,15 @@ async function showAdminScreen() {
   await refreshConfig();
 }
 
+// Fallback do "Voltar à app": em fase de captura, força a navegação mesmo que
+// algum handler/extensão engula o clique no anchor.
+document.addEventListener('click', (ev) => {
+  const a = ev.target?.closest?.('a.back-link');
+  if (!a) return;
+  ev.preventDefault();
+  window.location.assign(a.getAttribute('href'));
+}, true);
+
 // ---------------------------------------------------------------------------
 // Fluxo de PIN
 // ---------------------------------------------------------------------------
@@ -326,6 +335,7 @@ function renderLists() {
 function renderSettings() {
   const cfg = state.config;
   const status = $('#apikey-status');
+  if (!status) return; // variante estática: bloco da chave removido no build
   if (cfg.apiKeySet) {
     status.innerHTML = '';
     const ok = document.createElement('span');
@@ -393,7 +403,7 @@ $('#video-form').addEventListener('submit', async (ev) => {
 // Definições
 // ---------------------------------------------------------------------------
 
-$('#apikey-form').addEventListener('submit', async (ev) => {
+$('#apikey-form')?.addEventListener('submit', async (ev) => {
   ev.preventDefault();
   showError('#apikey-error', '');
   const apiKey = $('#apikey-input').value.trim();

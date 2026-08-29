@@ -117,7 +117,8 @@
       <section id="tab-settings" class="tab-panel" role="tabpanel" hidden>
         <h2>Definições</h2>
 
-        <div class="settings-block">
+        <!-- Removido do build estático (chave fixa vem do deploy) — ver scripts/build-static.mjs -->
+        <div class="settings-block" id="apikey-block">
           <h3>Chave da API do YouTube</h3>
           <p id="apikey-status" class="hint"></p>
           <form id="apikey-form" class="add-form" autocomplete="off">
