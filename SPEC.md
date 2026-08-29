@@ -42,8 +42,10 @@ recebe conteúdo bloqueado.
 Um vídeo é removido se:
 1. `channelId` ∈ blocked.channels, OU
 2. `videoId` ∈ blocked.videos, OU
-3. alguma keyword (case/acentos-insensitive, substring) aparece em `title`, `description`
-   ou `channelTitle`.
+3. alguma keyword (case/acentos-insensitive, substring) aparece em `title`, `description`,
+   `channelTitle` **ou nas tags do vídeo** (`snippet.tags` da YouTube API — metadado do
+   uploader, não visível na UI; só vem em `videos.list`, por isso qualquer lista que só use
+   `search.list`/`playlistItems.list` tem de passar por `enrich()` antes de filtrar).
 
 Normalização: lowercase + remover diacríticos (NFD). A pesquisa também rejeita a QUERY em si
 se contiver keyword bloqueada → responde `{"blockedQuery": true, "items": []}`.

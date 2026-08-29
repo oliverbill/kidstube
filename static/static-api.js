@@ -192,7 +192,10 @@
     const { blocked } = getConfig();
     if (blocked.channels.some((c) => c.id === video.channelId)) return true;
     if (blocked.videos.some((v) => v.id === video.id)) return true;
-    const haystack = normalize(`${video.title}\n${video.description || ''}\n${video.channelTitle}`);
+    const tags = Array.isArray(video.tags) ? video.tags.join('\n') : '';
+    const haystack = normalize(
+      `${video.title}\n${video.description || ''}\n${video.channelTitle}\n${tags}`,
+    );
     return blocked.keywords.some((kw) => haystack.includes(normalize(kw)));
   }
 
@@ -211,8 +214,9 @@
     return blocked.channels.some((c) => c.id === channelId);
   }
 
+  // Remove campos internos (usados só para filtragem) antes de responder à app.
   function stripDescription(v) {
-    const { description, ...rest } = v;
+    const { description, tags, ...rest } = v;
     return rest;
   }
 
@@ -273,6 +277,10 @@
       duration: details ? isoDuration(details.contentDetails?.duration) : null,
       publishedAt: snippet?.publishedAt || null,
       views: details ? (details.statistics?.viewCount ?? null) : null,
+      // Tags do YouTube (metadado do uploader) — só vêm em snippet de videos.list,
+      // nunca em search.list/playlistItems.list; por isso o enrich() é essencial
+      // para filtrar por tema mesmo quando o termo não está no título.
+      tags: snippet?.tags || null,
     };
   }
 

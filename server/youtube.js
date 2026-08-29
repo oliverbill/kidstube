@@ -54,7 +54,10 @@ function isBlocked(video) {
   const { blocked } = store.getConfig();
   if (blocked.channels.some((c) => c.id === video.channelId)) return true;
   if (blocked.videos.some((v) => v.id === video.id)) return true;
-  const haystack = normalize(`${video.title}\n${video.description || ''}\n${video.channelTitle}`);
+  const tags = Array.isArray(video.tags) ? video.tags.join('\n') : '';
+  const haystack = normalize(
+    `${video.title}\n${video.description || ''}\n${video.channelTitle}\n${tags}`,
+  );
   return blocked.keywords.some((kw) => haystack.includes(normalize(kw)));
 }
 
@@ -99,6 +102,10 @@ function videoFromSnippet(id, snippet, details) {
     duration: details ? isoDuration(details.contentDetails?.duration) : null,
     publishedAt: snippet?.publishedAt || null,
     views: details ? (details.statistics?.viewCount ?? null) : null,
+    // Tags do YouTube (metadado interno do uploader) — só existe em snippet de
+    // videos.list, nunca em search.list/playlistItems.list; por isso o enrich()
+    // é essencial para filtrar por tema mesmo quando o termo não está no título.
+    tags: snippet?.tags || null,
   };
 }
 
@@ -128,8 +135,9 @@ function usingMock() {
   return !store.getConfig().apiKey;
 }
 
+// Remove campos internos (usados só para filtragem) antes de responder ao cliente.
 function stripDescription(v) {
-  const { description, ...rest } = v;
+  const { description, tags, ...rest } = v;
   return rest;
 }
 
