@@ -298,6 +298,30 @@
 
   // ---------- Operações públicas (mock-aware; TODAS filtradas) ----------
 
+  // Pesquisa de canais por nome/@handle (para a administração escolher qual bloquear).
+  async function searchChannels(q) {
+    const query = String(q || '').trim();
+    if (!query) return { items: [] };
+    if (usingMock()) {
+      const nq = normalize(query);
+      return { items: MOCK_CHANNELS.filter((c) => normalize(c.title).includes(nq)) };
+    }
+    const data = await apiGet('/search', {
+      part: 'snippet',
+      type: 'channel',
+      q: query,
+      maxResults: 6,
+    });
+    return {
+      items: (data.items || [])
+        .filter((it) => it.id?.channelId)
+        .map((it) => ({
+          id: it.id.channelId,
+          title: it.snippet?.channelTitle || it.snippet?.title || '',
+        })),
+    };
+  }
+
   function usingMock() {
     return !effectiveApiKey(getConfig());
   }
@@ -569,6 +593,9 @@
             blocked: cfg.blocked,
             safeSearch: cfg.safeSearch,
           });
+        }
+        if (method === 'GET' && pathname === '/api/admin/search/channels') {
+          return json(await searchChannels(searchParams.get('q')));
         }
         if (method === 'POST' && pathname === '/api/admin/apikey') {
           const body = await getBody(input, init);

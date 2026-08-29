@@ -351,12 +351,104 @@ function renderSettings() {
 // Forms de adicionar
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Autocomplete de canais por nome/@handle
+// ---------------------------------------------------------------------------
+
+const channelInput = $('#channel-input');
+const suggestBox = $('#channel-suggest');
+let suggestTimer = null;
+let suggestSeq = 0;
+
+function hideSuggest() {
+  suggestBox.hidden = true;
+  suggestBox.textContent = '';
+}
+
+async function blockChannelEntry(id, title) {
+  await api('POST', '/api/admin/block/channel', { id, title });
+  $('#channel-form').reset();
+  hideSuggest();
+  await refreshConfig();
+  flash(title ? `Canal "${title}" bloqueado.` : 'Canal bloqueado.');
+}
+
+async function runSuggest(q) {
+  const seq = ++suggestSeq;
+  const res = await api('GET', `/api/admin/search/channels?q=${encodeURIComponent(q)}`);
+  if (seq !== suggestSeq) return false; // resposta antiga; outra pesquisa em curso
+  suggestBox.textContent = '';
+  if (!res.items.length) {
+    hideSuggest();
+    return false;
+  }
+  for (const ch of res.items) {
+    const li = document.createElement('li');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'suggest-item';
+    const t = document.createElement('span');
+    t.className = 'item-title';
+    t.textContent = ch.title || '(sem título)';
+    const id = document.createElement('span');
+    id.className = 'item-id';
+    id.textContent = ch.id;
+    btn.append(t, id);
+    btn.addEventListener('click', async () => {
+      try {
+        await blockChannelEntry(ch.id, ch.title);
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 401) return;
+        showError('#channel-error', err.message);
+      }
+    });
+    li.append(btn);
+    suggestBox.append(li);
+  }
+  suggestBox.hidden = false;
+  return true;
+}
+
+channelInput.addEventListener('input', () => {
+  clearTimeout(suggestTimer);
+  showError('#channel-error', '');
+  const q = channelInput.value.trim();
+  // URLs e IDs não precisam de pesquisa; nomes só a partir de 3 caracteres.
+  if (q.length < 3 || CHANNEL_ID_RE.test(q) || /youtube\.|youtu\.be/.test(q)) {
+    hideSuggest();
+    return;
+  }
+  suggestTimer = setTimeout(() => {
+    runSuggest(q).catch(() => { /* autocomplete é conveniência; sem alarme */ });
+  }, 350);
+});
+
+document.addEventListener('click', (ev) => {
+  if (!ev.target.closest('.autocomplete')) hideSuggest();
+});
+
 $('#channel-form').addEventListener('submit', async (ev) => {
   ev.preventDefault();
   showError('#channel-error', '');
+  const raw = channelInput.value.trim();
+  const title = $('#channel-title').value.trim();
+  let id = null;
   try {
-    const id = extractChannelId($('#channel-input').value);
-    const title = $('#channel-title').value.trim();
+    id = extractChannelId(raw);
+  } catch (err) {
+    // URL de vídeo é engano claro; qualquer outro texto tratamos como nome a pesquisar.
+    const parsed = parseYouTubeUrl(raw);
+    if (parsed && parsed.kind === 'video') {
+      showError('#channel-error', err.message);
+      return;
+    }
+  }
+  try {
+    if (!id) {
+      const found = await runSuggest(raw);
+      if (!found) showError('#channel-error', 'Não encontrei canais com esse nome.');
+      return;
+    }
     await api('POST', '/api/admin/block/channel', { id, title });
     $('#channel-form').reset();
     await refreshConfig();

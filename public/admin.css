@@ -253,6 +253,42 @@ main {
 .add-form-column { flex-direction: column; align-items: stretch; }
 .add-form-column input { flex: 1 1 auto; }
 
+.autocomplete { position: relative; flex: 1 1 220px; display: flex; }
+.autocomplete input { flex: 1 1 auto; width: 100%; }
+
+.suggest-list {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 4px;
+  background: var(--surface, #212121);
+  border: 1px solid #383838;
+  border-radius: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+.suggest-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  padding: 10px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.suggest-item:hover, .suggest-item:focus { background: #383838; }
+
 .item-list {
   list-style: none;
   margin: 0;

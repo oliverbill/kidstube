@@ -231,6 +231,10 @@ async function handleApi(req, res, url) {
     if (!requirePin(req, res)) return;
   }
 
+  if (method === 'GET' && p === '/api/admin/search/channels') {
+    return sendJson(res, 200, await yt.searchChannels(url.searchParams.get('q') || ''));
+  }
+
   if (method === 'GET' && p === '/api/admin/config') {
     const cfg = store.getConfig();
     return sendJson(res, 200, {

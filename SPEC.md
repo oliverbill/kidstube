@@ -75,6 +75,8 @@ faz batch `videos.list` para preencher quando possível.)
 - `POST /api/admin/verify` body `{}` + header — `{"ok": true}` ou 401.
 - `GET  /api/admin/config` → config sem apiKey em claro: `{"apiKeySet": bool, "blocked": {...}, "safeSearch"}`
 - `POST /api/admin/apikey` body `{"apiKey": "..."}`
+- `GET  /api/admin/search/channels?q=...` → pesquisa canais por nome/@handle (para o
+  autocomplete do bloqueio). Resp: `{"items": [{"id": "UC...", "title": "..."}]}`
 - `POST /api/admin/block/channel` body `{"id","title"}` ; `DELETE /api/admin/block/channel/:id`
 - `POST /api/admin/block/keyword` body `{"keyword"}` ; `DELETE /api/admin/block/keyword/:kw` (kw URL-encoded)
 - `POST /api/admin/block/video` body `{"id","title"}` ; `DELETE /api/admin/block/video/:id`

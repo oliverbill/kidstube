@@ -176,6 +176,30 @@ async function search(q) {
   return { blockedQuery: false, items: filterVideos(videos).map(stripDescription) };
 }
 
+// Pesquisa de canais por nome/@handle (para a administração escolher qual bloquear).
+async function searchChannels(q) {
+  const query = String(q || '').trim();
+  if (!query) return { items: [] };
+  if (usingMock()) {
+    const nq = normalize(query);
+    return { items: mockdata.CHANNELS.filter((c) => normalize(c.title).includes(nq)) };
+  }
+  const data = await apiGet('/search', {
+    part: 'snippet',
+    type: 'channel',
+    q: query,
+    maxResults: 6,
+  });
+  return {
+    items: (data.items || [])
+      .filter((it) => it.id?.channelId)
+      .map((it) => ({
+        id: it.id.channelId,
+        title: it.snippet?.channelTitle || it.snippet?.title || '',
+      })),
+  };
+}
+
 async function videoDetails(id) {
   let video = null;
   if (usingMock()) {
@@ -242,6 +266,7 @@ module.exports = {
   isoDuration,
   home,
   search,
+  searchChannels,
   videoDetails,
   channel,
 };

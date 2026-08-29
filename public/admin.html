@@ -75,8 +75,11 @@
       <section id="tab-channels" class="tab-panel" role="tabpanel">
         <h2>Canais bloqueados</h2>
         <form id="channel-form" class="add-form" autocomplete="off">
-          <input id="channel-input" type="text" required
-                 placeholder="URL do canal (…/channel/UC…) ou ID UC…">
+          <div class="autocomplete">
+            <input id="channel-input" type="text" required
+                   placeholder="Nome, @handle ou URL do canal">
+            <ul id="channel-suggest" class="suggest-list" hidden></ul>
+          </div>
           <input id="channel-title" type="text" placeholder="Título (opcional)">
           <button type="submit" class="btn btn-primary">Bloquear canal</button>
         </form>
