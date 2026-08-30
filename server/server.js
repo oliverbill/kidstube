@@ -185,8 +185,9 @@ async function handleApi(req, res, url) {
   }
 
   if (method === 'GET' && p === '/api/home') {
-    const items = await yt.home();
-    return sendJson(res, 200, { items });
+    const pageToken = url.searchParams.get('pageToken') || undefined;
+    const result = await yt.home(pageToken);
+    return sendJson(res, 200, result);
   }
 
   if (method === 'GET' && p === '/api/search') {

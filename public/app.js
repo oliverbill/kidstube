@@ -214,7 +214,18 @@ async function viewHome() {
       showMessage({ emoji: '📺', title: 'Sem vídeos por agora', text: 'Volta mais tarde!' });
       return;
     }
-    app.appendChild(videoGrid(data.items));
+    const grid = videoGrid(data.items);
+    app.appendChild(grid);
+    let nextPageToken = data.nextPageToken || null;
+    if (nextPageToken) {
+      startInfiniteScroll(seq, async () => {
+        const more = await apiGet(`/api/home?pageToken=${encodeURIComponent(nextPageToken)}`);
+        if (seq !== renderSeq) return false;
+        for (const v of more.items || []) grid.appendChild(videoCard(v));
+        nextPageToken = more.nextPageToken || null;
+        return Boolean(nextPageToken);
+      });
+    }
   } catch {
     if (seq === renderSeq) showError(viewHome);
   }

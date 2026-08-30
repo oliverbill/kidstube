@@ -16,6 +16,15 @@ const PAGE_SIZE = 50;
 const TARGET_RESULTS = 30;
 const MAX_PAGES = 4;
 
+// A home usa primeiro o chart "mostPopular" (o mesmo que o YouTube mostra na
+// sua própria home). Esse chart tem um teto por região (tipicamente ~200
+// vídeos) — quando se esgota, a home passa a rodar ciclicamente por estes
+// temas via search.list, para nunca ficar sem vídeos novos ao dar scroll.
+const HOME_SEED_QUERIES = [
+  'música', 'desenhos animados', 'jogos', 'ciência', 'esportes',
+  'natureza', 'culinária', 'humor', 'tecnologia', 'viagens',
+];
+
 // ---------- Cache em memória (10 min, chave = url) para poupar quota ----------
 
 const CACHE_TTL_MS = 10 * 60 * 1000;
@@ -151,20 +160,48 @@ function stripDescription(v) {
 
 // ---------- Operações públicas (mock-aware; TODAS filtradas) ----------
 
-async function home() {
-  const cfg = store.getConfig();
-  let videos;
+async function home(pageToken) {
   if (usingMock()) {
-    videos = mockdata.VIDEOS.slice();
-  } else {
-    const data = await apiGet('/videos', {
-      part: 'snippet,contentDetails,statistics',
-      chart: 'mostPopular',
-      maxResults: 30,
-    });
-    videos = (data.items || []).map((it) => videoFromSnippet(it.id, it.snippet, it));
+    return { items: filterVideos(mockdata.VIDEOS.slice()).map(stripDescription), nextPageToken: null };
   }
-  return filterVideos(videos).map(stripDescription);
+
+  // Fase 1: chart=mostPopular (o mesmo catálogo que a home do YouTube usa).
+  if (!pageToken || pageToken.startsWith('mp:')) {
+    let token = pageToken ? pageToken.slice(3) || undefined : undefined;
+    let videos = [];
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const data = await apiGet('/videos', {
+        part: 'snippet,contentDetails,statistics',
+        chart: 'mostPopular',
+        maxResults: PAGE_SIZE,
+        pageToken: token,
+      });
+      videos = videos.concat((data.items || []).map((it) => videoFromSnippet(it.id, it.snippet, it)));
+      token = data.nextPageToken || null;
+      const survivors = videos.filter((v) => !isBlocked(v)).length;
+      if (!token || survivors >= TARGET_RESULTS) break;
+    }
+    if (token) {
+      return { items: filterVideos(videos).map(stripDescription), nextPageToken: `mp:${token}` };
+    }
+    // O chart esgotou-se (teto da API por região) — passa à rotação de temas,
+    // que nunca acaba: ao esgotar um termo avança para o seguinte, ciclicamente.
+    const result = await search(HOME_SEED_QUERIES[0], undefined);
+    const nextPageToken = result.nextPageToken
+      ? `sr:0:${result.nextPageToken}`
+      : `sr:${1 % HOME_SEED_QUERIES.length}:`;
+    return { items: result.items, nextPageToken };
+  }
+
+  // Fase 2: rotação cíclica de buscas por tema.
+  const m = /^sr:(\d+):(.*)$/.exec(pageToken);
+  const idx = m ? Number(m[1]) % HOME_SEED_QUERIES.length : 0;
+  const seedToken = m && m[2] ? m[2] : undefined;
+  const result = await search(HOME_SEED_QUERIES[idx], seedToken);
+  const nextPageToken = result.nextPageToken
+    ? `sr:${idx}:${result.nextPageToken}`
+    : `sr:${(idx + 1) % HOME_SEED_QUERIES.length}:`;
+  return { items: result.items, nextPageToken };
 }
 
 async function search(q, pageToken) {
