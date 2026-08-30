@@ -669,6 +669,15 @@
         return json({ ok: true });
       }
 
+      // Pesquisa de canais (autocomplete): não passa por requirePin porque o PIN
+      // real, na variante estática, é validado pelo Worker (ver worker/) antes de
+      // sequer se chegar ao ecrã de administração — o pinHash local deste shim
+      // nunca chega a ser definido (admin.js grava o PIN só no Worker), por isso
+      // exigi-lo aqui bloquearia SEMPRE esta rota com 401.
+      if (method === 'GET' && pathname === '/api/admin/search/channels') {
+        return json(await searchChannels(searchParams.get('q')));
+      }
+
       // As restantes rotas admin exigem sempre X-Pin válido.
       if (pathname.startsWith('/api/admin/')) {
         const denied = await requirePin(input, init);
@@ -680,9 +689,6 @@
             apiKeySet: !!effectiveApiKey(cfg),
             safeSearch: cfg.safeSearch,
           });
-        }
-        if (method === 'GET' && pathname === '/api/admin/search/channels') {
-          return json(await searchChannels(searchParams.get('q')));
         }
         if (method === 'POST' && pathname === '/api/admin/apikey') {
           const body = await getBody(input, init);
