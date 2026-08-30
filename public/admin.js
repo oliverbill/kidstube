@@ -22,18 +22,13 @@ const GH_OWNER = 'oliverbill';
 const GH_REPO = 'kidstube';
 const GH_PATH = 'blocklist.json';
 const GH_BRANCH = 'main';
-const GH_TOKEN_KEY = 'kidtube-gh-token';
 
-function ghToken() {
-  return localStorage.getItem(GH_TOKEN_KEY) || '';
-}
+// Worker central (worker/) — guarda o PIN partilhado e o token do GitHub como
+// secret; a gravação em blocklist.json passa sempre por aqui, nunca direto do
+// browser. Ver worker/src/index.js.
+const WORKER_BASE = 'https://kidstube-admin.alves-bill.workers.dev';
 
-function setGhToken(token) {
-  if (token) localStorage.setItem(GH_TOKEN_KEY, token);
-  else localStorage.removeItem(GH_TOKEN_KEY);
-}
-
-// Leitura é sempre pública (repo público) — não precisa de token.
+// Leitura é sempre pública (repo público) — não precisa de token nem do Worker.
 async function ghReadBlocklist() {
   const res = await fetch(
     `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${GH_PATH}?ref=${GH_BRANCH}`,
@@ -44,7 +39,6 @@ async function ghReadBlocklist() {
   const decoded = decodeURIComponent(escape(atob(data.content.replace(/\n/g, ''))));
   const parsed = JSON.parse(decoded);
   return {
-    sha: data.sha,
     blocked: {
       channels: Array.isArray(parsed.channels) ? parsed.channels : [],
       keywords: Array.isArray(parsed.keywords) ? parsed.keywords : [],
@@ -53,45 +47,11 @@ async function ghReadBlocklist() {
   };
 }
 
-// Escrita exige o token pessoal guardado neste dispositivo (nunca sai daqui).
-async function ghWriteBlocklist(blocked, sha, message) {
-  const token = ghToken();
-  if (!token) throw new Error('Cola o token do GitHub em Definições antes de gravar.');
-  const body = {
-    message,
-    branch: GH_BRANCH,
-    sha,
-    content: btoa(unescape(encodeURIComponent(JSON.stringify(blocked, null, 2) + '\n'))),
-  };
-  const res = await fetch(
-    `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${GH_PATH}`,
-    {
-      method: 'PUT',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: 'application/vnd.github+json',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    },
-  );
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    if (res.status === 401 || res.status === 403) {
-      throw new Error('Token do GitHub inválido ou sem permissão de escrita neste repositório.');
-    }
-    if (res.status === 409) throw new Error('O blocklist.json mudou entretanto — tenta outra vez.');
-    throw new Error(err.message || `O GitHub recusou a gravação (${res.status}).`);
-  }
-}
-
-// Lê o ficheiro mais recente, aplica a mutação e grava — evita conflitos de sha
-// quando duas pessoas editam quase ao mesmo tempo.
-async function mutateBlocklist(mutate, message) {
-  const { blocked, sha } = await ghReadBlocklist();
-  mutate(blocked);
-  await ghWriteBlocklist(blocked, sha, message);
-  return blocked;
+// Grava uma mutação via Worker (que lê o ficheiro mais recente, aplica e
+// grava com o seu próprio token — evita conflitos de sha do lado dele).
+async function workerMutateBlocklist(op, payload, message) {
+  const res = await workerFetch('/blocklist/mutate', { op, payload, message });
+  return res.blocked;
 }
 
 // ---------------------------------------------------------------------------
@@ -110,14 +70,7 @@ function clearPin() {
   sessionStorage.removeItem(PIN_KEY);
 }
 
-async function api(method, path, body, opts = {}) {
-  const headers = { 'Content-Type': 'application/json' };
-  if (!opts.noPin) headers['X-Pin'] = getPin();
-  const resp = await fetch(path, {
-    method,
-    headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+async function handleApiResponse(resp, opts) {
   let data = null;
   try { data = await resp.json(); } catch { /* corpo vazio ou não-JSON */ }
 
@@ -134,6 +87,44 @@ async function api(method, path, body, opts = {}) {
     throw new ApiError(resp.status, (data && data.error) || `Erro ${resp.status}`);
   }
   return data;
+}
+
+async function api(method, path, body, opts = {}) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (!opts.noPin) headers['X-Pin'] = getPin();
+  const resp = await fetch(path, {
+    method,
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  return handleApiResponse(resp, opts);
+}
+
+// Fala com o Worker central (worker/) em vez do fetch interceptado localmente
+// — usado só nos pontos de admin.js que precisam de PIN/gravação partilhados
+// (ver WORKER_BASE acima).
+async function workerFetch(path, body, opts = {}) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (!opts.noPin) headers['X-Pin'] = getPin();
+  const resp = await fetch(WORKER_BASE + path, {
+    method: opts.method || 'POST',
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  return handleApiResponse(resp, opts);
+}
+
+// PIN é sempre partilhado via Worker na variante estática (ver WORKER_BASE).
+function verifyPinCall(opts) {
+  return IS_STATIC
+    ? workerFetch('/verify', {}, opts)
+    : api('POST', '/api/admin/verify', {}, opts);
+}
+
+function setPinCall(pin, opts) {
+  return IS_STATIC
+    ? workerFetch('/pin', { pin }, opts)
+    : api('POST', '/api/admin/pin', { pin }, opts);
 }
 
 class ApiError extends Error {
@@ -269,10 +260,11 @@ async function boot() {
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js').catch(() => { /* PWA opcional */ });
   }
-  if (!IS_STATIC) $('#ghtoken-block')?.remove();
   let status;
   try {
-    status = await api('GET', '/api/status', undefined, { noPin: true });
+    status = IS_STATIC
+      ? await workerFetch('/status', undefined, { method: 'GET', noPin: true })
+      : await api('GET', '/api/status', undefined, { noPin: true });
   } catch (err) {
     showPinScreen(`Não foi possível contactar o servidor (${err.message}).`);
     return;
@@ -283,7 +275,7 @@ async function boot() {
   }
   if (getPin()) {
     try {
-      await api('POST', '/api/admin/verify', {}, { keep401: false });
+      await verifyPinCall({ keep401: false });
       await showAdminScreen();
       return;
     } catch (err) {
@@ -303,8 +295,8 @@ $('#pin-setup-form').addEventListener('submit', async (ev) => {
     return;
   }
   try {
-    setPin(pin); // /api/admin/pin na 1ª vez não exige X-Pin, mas guardamos já
-    await api('POST', '/api/admin/pin', { pin }, { keep401: true });
+    setPin(pin); // 1ª vez não exige X-Pin, mas guardamos já
+    await setPinCall(pin, { keep401: true });
     await showAdminScreen();
   } catch (err) {
     clearPin();
@@ -317,7 +309,7 @@ $('#pin-entry-form').addEventListener('submit', async (ev) => {
   const pin = $('#pin-input').value;
   setPin(pin);
   try {
-    await api('POST', '/api/admin/verify', {}, { keep401: true });
+    await verifyPinCall({ keep401: true });
     $('#pin-input').value = '';
     await showAdminScreen();
   } catch (err) {
@@ -361,15 +353,6 @@ async function refreshConfig() {
   }
   renderLists();
   renderSettings();
-  renderGhTokenStatus();
-}
-
-function renderGhTokenStatus() {
-  const status = $('#ghtoken-status');
-  if (!status) return; // servidor Node: bloco do token nem existe
-  status.textContent = ghToken()
-    ? 'Token configurado neste dispositivo ✓ — cole outro para o substituir.'
-    : 'Sem token — os bloqueios não podem ser gravados a partir deste dispositivo.';
 }
 
 function renderList(listSel, emptySel, items, renderItem, onRemove) {
@@ -412,9 +395,7 @@ function renderLists() {
     id.textContent = ch.id;
     el.append(t, id);
   }, (ch) => IS_STATIC
-    ? mutateBlocklist((bl) => {
-        bl.channels = bl.channels.filter((c) => c.id !== ch.id);
-      }, `Desbloquear canal: ${ch.title || ch.id}`)
+    ? workerMutateBlocklist('unblock-channel', { id: ch.id }, `Desbloquear canal: ${ch.title || ch.id}`)
     : api('DELETE', `/api/admin/block/channel/${encodeURIComponent(ch.id)}`));
 
   renderList('#keyword-list', '#keyword-empty', b.keywords || [], (el, kw) => {
@@ -423,9 +404,7 @@ function renderLists() {
     t.textContent = kw;
     el.append(t);
   }, (kw) => IS_STATIC
-    ? mutateBlocklist((bl) => {
-        bl.keywords = bl.keywords.filter((k) => k !== kw);
-      }, `Desbloquear tema: ${kw}`)
+    ? workerMutateBlocklist('unblock-keyword', { keyword: kw }, `Desbloquear tema: ${kw}`)
     : api('DELETE', `/api/admin/block/keyword/${encodeURIComponent(kw)}`));
 
   renderList('#video-list', '#video-empty', b.videos || [], (el, v) => {
@@ -437,9 +416,7 @@ function renderLists() {
     id.textContent = v.id;
     el.append(t, id);
   }, (v) => IS_STATIC
-    ? mutateBlocklist((bl) => {
-        bl.videos = bl.videos.filter((vd) => vd.id !== v.id);
-      }, `Desbloquear vídeo: ${v.title || v.id}`)
+    ? workerMutateBlocklist('unblock-video', { id: v.id }, `Desbloquear vídeo: ${v.title || v.id}`)
     : api('DELETE', `/api/admin/block/video/${encodeURIComponent(v.id)}`));
 }
 
@@ -478,9 +455,7 @@ function hideSuggest() {
 
 async function blockChannelEntry(id, title) {
   if (IS_STATIC) {
-    await mutateBlocklist((bl) => {
-      if (!bl.channels.some((c) => c.id === id)) bl.channels.push({ id, title: title || '' });
-    }, `Bloquear canal: ${title || id}`);
+    await workerMutateBlocklist('block-channel', { id, title }, `Bloquear canal: ${title || id}`);
   } else {
     await api('POST', '/api/admin/block/channel', { id, title });
   }
@@ -580,9 +555,7 @@ $('#keyword-form').addEventListener('submit', async (ev) => {
   if (!keyword) return;
   try {
     if (IS_STATIC) {
-      await mutateBlocklist((bl) => {
-        if (!bl.keywords.includes(keyword)) bl.keywords.push(keyword);
-      }, `Bloquear tema: ${keyword}`);
+      await workerMutateBlocklist('block-keyword', { keyword }, `Bloquear tema: ${keyword}`);
     } else {
       await api('POST', '/api/admin/block/keyword', { keyword });
     }
@@ -602,9 +575,7 @@ $('#video-form').addEventListener('submit', async (ev) => {
     const id = extractVideoId($('#video-input').value);
     const title = $('#video-title').value.trim();
     if (IS_STATIC) {
-      await mutateBlocklist((bl) => {
-        if (!bl.videos.some((v) => v.id === id)) bl.videos.push({ id, title: title || '' });
-      }, `Bloquear vídeo: ${title || id}`);
+      await workerMutateBlocklist('block-video', { id, title }, `Bloquear vídeo: ${title || id}`);
     } else {
       await api('POST', '/api/admin/block/video', { id, title });
     }
@@ -640,21 +611,6 @@ $('#apikey-form')?.addEventListener('submit', async (ev) => {
   }
 });
 
-
-$('#ghtoken-form')?.addEventListener('submit', (ev) => {
-  ev.preventDefault();
-  showError('#ghtoken-error', '');
-  const token = $('#ghtoken-input').value.trim();
-  if (!token) {
-    showError('#ghtoken-error', 'Cola o token antes de guardar.');
-    return;
-  }
-  setGhToken(token);
-  $('#ghtoken-form').reset();
-  renderGhTokenStatus();
-  flash('Token do GitHub guardado neste dispositivo.');
-});
-
 $('#changepin-form').addEventListener('submit', async (ev) => {
   ev.preventDefault();
   showError('#changepin-error', '');
@@ -665,7 +621,7 @@ $('#changepin-form').addEventListener('submit', async (ev) => {
     return;
   }
   try {
-    await api('POST', '/api/admin/pin', { pin }); // X-Pin atual valida a troca
+    await setPinCall(pin, {}); // X-Pin atual valida a troca
     setPin(pin);
     $('#changepin-form').reset();
     flash('PIN alterado.');

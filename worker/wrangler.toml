@@ -1,0 +1,10 @@
+name = "kidstube-admin"
+main = "src/index.js"
+compatibility_date = "2026-08-01"
+
+kv_namespaces = [
+  { binding = "PIN_KV", id = "a516f48215c94c7d9f4e9acb4dcae25c" }
+]
+
+# GITHUB_TOKEN é um secret — não vai aqui. Definir com:
+#   wrangler secret put GITHUB_TOKEN

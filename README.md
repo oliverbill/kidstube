@@ -57,19 +57,14 @@ bloqueios em **`blocklist.json`** na raiz do repositório — público, lido por
 via `raw.githubusercontent.com`. Um bloqueio feito num dispositivo aplica-se a todos os outros
 com a app instalada, ao fim de alguns minutos (cache de 5 min + cache do CDN do GitHub).
 
-Para **gravar** bloqueios a partir do painel (não é preciso para ler/navegar):
+A **gravação** (não é preciso para ler/navegar) passa por um Cloudflare Worker central
+(`worker/`), que guarda o token do GitHub como *secret* do lado do servidor — nenhum dispositivo
+precisa de colar um token pessoal. O PIN de administração também deixou de ser por dispositivo:
+vive no KV do Worker, partilhado por todos os aparelhos. Ver `worker/README` (deploy com
+`worker/deploy.sh`, corrido manualmente por quem administra) para pôr o Worker no ar.
 
-1. Cria um token em
-   [github.com/settings/personal-access-tokens/new](https://github.com/settings/personal-access-tokens/new),
-   com acesso restrito ao repositório `kidstube` e permissão **Contents: Read and write**.
-2. No painel de administração (`.../admin.html`, PIN necessário) → **Definições** → cola o
-   token em "Token do GitHub". Fica só no `localStorage` desse dispositivo — nunca é publicado
-   nem sai daí.
-3. Cada bloqueio/desbloqueio passa a ser um commit no repositório (mensagem tipo
-   "Bloquear canal: X"), visível no histórico do GitHub.
-
-Guarda o token só nos teus próprios dispositivos de administração — não o coloques no iPad
-da criança, já que esse não precisa de gravar nada, só de ler o `blocklist.json` público.
+Cada bloqueio/desbloqueio feito no painel passa a ser um commit no repositório (mensagem tipo
+"Bloquear canal: X"), visível no histórico do GitHub.
 
 ## Limitações honestas
 
