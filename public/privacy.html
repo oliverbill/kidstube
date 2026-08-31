@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="pt-PT">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KidTube — Política de Privacidade</title>
+  <meta name="theme-color" content="#0f0f0f">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <header class="topbar">
+    <a href="./" class="logo" aria-label="KidTube — início">
+      <span class="logo-play" aria-hidden="true"></span>
+      <span class="logo-text">KidTube</span>
+    </a>
+  </header>
+  <main class="content" style="max-width: 760px;">
+    <h1 class="page-title">Política de Privacidade</h1>
+    <p>O KidTube é uma aplicação familiar, de uso pessoal, que apresenta uma seleção
+      filtrada de vídeos do YouTube para crianças. Não é um serviço comercial e não tem
+      utilizadores fora da família que o mantém.</p>
+
+    <h2 class="section-title">Que dados são acedidos</h2>
+    <p>Quando um adulto liga a sua conta do YouTube em Definições, o KidTube pede acesso
+      só de leitura ao âmbito <code>youtube.readonly</code> — usado exclusivamente para
+      ler a lista de <strong>canais inscritos</strong> dessa conta (nome e identificador
+      do canal), de forma a mostrar vídeos recentes desses canais na aplicação.</p>
+    <p>Não são lidos, guardados nem partilhados: vídeos assistidos na conta do YouTube,
+      histórico de pesquisa, dados pessoais do perfil Google, contactos, e-mail, ou
+      qualquer outro âmbito além das inscrições.</p>
+
+    <h2 class="section-title">Onde ficam os dados</h2>
+    <p>O token de autorização (usado para renovar o acesso de leitura) fica guardado
+      apenas num Cloudflare Worker privado que serve esta aplicação — nunca é exposto no
+      navegador, nunca é publicado no código-fonte, e nunca é partilhado com terceiros.</p>
+    <p>O histórico de vídeos vistos <em>dentro do KidTube</em> (diferente do histórico do
+      YouTube) fica guardado só no dispositivo, em armazenamento local do navegador —
+      nunca sai desse aparelho.</p>
+
+    <h2 class="section-title">Revogar o acesso</h2>
+    <p>A qualquer momento, em
+      <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">
+        myaccount.google.com/permissions</a>, o titular da conta Google pode revogar o
+      acesso do KidTube.</p>
+
+    <h2 class="section-title">Contacto</h2>
+    <p>Dúvidas: <a href="mailto:admin@oliversoft.tech">admin@oliversoft.tech</a>.</p>
+
+    <p><a href="./" style="text-decoration: underline;">← Voltar à app</a></p>
+  </main>
+</body>
+</html>
