@@ -38,12 +38,17 @@ const dropApikeyBlock = (s) => {
 rewrite('index.html', [relAttrs, injectShim('app.js')]);
 rewrite('admin.html', [relAttrs, dropApikeyBlock, injectShim('admin.js')]);
 
-for (const f of ['app.js', 'admin.js'])
-  rewrite(f, [(s) => s.replace(/register\('\/sw\.js'\)/g, "register('./sw.js')")]);
-
 // Cada deploy ganha um cache novo no service worker, senão os clientes ficam
 // presos ao shim antigo (e à chave antiga) até alguém bumpar a versão à mão.
 const buildId = process.env.KIDTUBE_BUILD_ID || 'dev';
+
+// GitHub Pages serve sw.js com Cache-Control: max-age=600 — sem um URL diferente a
+// cada deploy, o Safari (sobretudo em PWA instalada no iPad) pode servir o sw.js
+// antigo do cache HTTP por até 10 min sem sequer verificar a rede, e o registo nunca
+// vê a versão nova. A query string muda o URL do registo a cada build, forçando um
+// registo "novo" que ignora esse cache.
+for (const f of ['app.js', 'admin.js'])
+  rewrite(f, [(s) => s.replace(/register\('\/sw\.js'\)/g, `register('./sw.js?v=${buildId.slice(0, 12)}')`)]);
 rewrite('sw.js', [(s) => s
   .replace(/const CACHE_VERSION = '[^']+';/, `const CACHE_VERSION = 'kidtube-${buildId.slice(0, 12)}';`)
   .replace(/'\/(admin|app|index|icons|manifest|sw)/g, "'./$1")
