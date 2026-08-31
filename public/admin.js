@@ -355,6 +355,14 @@ async function refreshConfig() {
   renderSettings();
 }
 
+// Aplica diretamente o `blocked` devolvido pelo Worker após uma mutação — relê-lo
+// do GitHub logo a seguir (refreshConfig) bate por vezes numa réplica que ainda não
+// viu o commit e faz o item recém-bloqueado "desaparecer" da tela.
+function applyBlocked(blocked) {
+  state.config = { ...state.config, blocked };
+  renderLists();
+}
+
 function renderList(listSel, emptySel, items, renderItem, onRemove) {
   const ul = $(listSel);
   ul.textContent = '';
@@ -372,8 +380,9 @@ function renderList(listSel, emptySel, items, renderItem, onRemove) {
     btn.addEventListener('click', async () => {
       btn.disabled = true;
       try {
-        await onRemove(item);
-        await refreshConfig();
+        const blocked = await onRemove(item);
+        if (IS_STATIC) applyBlocked(blocked);
+        else await refreshConfig();
       } catch (err) {
         btn.disabled = false;
         flash(err.message, true);
@@ -455,13 +464,14 @@ function hideSuggest() {
 
 async function blockChannelEntry(id, title) {
   if (IS_STATIC) {
-    await workerMutateBlocklist('block-channel', { id, title }, `Bloquear canal: ${title || id}`);
+    const blocked = await workerMutateBlocklist('block-channel', { id, title }, `Bloquear canal: ${title || id}`);
+    applyBlocked(blocked);
   } else {
     await api('POST', '/api/admin/block/channel', { id, title });
+    await refreshConfig();
   }
   $('#channel-form').reset();
   hideSuggest();
-  await refreshConfig();
   flash(title ? `Canal "${title}" bloqueado.` : 'Canal bloqueado.');
 }
 
@@ -555,12 +565,13 @@ $('#keyword-form').addEventListener('submit', async (ev) => {
   if (!keyword) return;
   try {
     if (IS_STATIC) {
-      await workerMutateBlocklist('block-keyword', { keyword }, `Bloquear tema: ${keyword}`);
+      const blocked = await workerMutateBlocklist('block-keyword', { keyword }, `Bloquear tema: ${keyword}`);
+      applyBlocked(blocked);
     } else {
       await api('POST', '/api/admin/block/keyword', { keyword });
+      await refreshConfig();
     }
     $('#keyword-form').reset();
-    await refreshConfig();
     flash('Tema bloqueado.');
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) return;
@@ -575,12 +586,13 @@ $('#video-form').addEventListener('submit', async (ev) => {
     const id = extractVideoId($('#video-input').value);
     const title = $('#video-title').value.trim();
     if (IS_STATIC) {
-      await workerMutateBlocklist('block-video', { id, title }, `Bloquear vídeo: ${title || id}`);
+      const blocked = await workerMutateBlocklist('block-video', { id, title }, `Bloquear vídeo: ${title || id}`);
+      applyBlocked(blocked);
     } else {
       await api('POST', '/api/admin/block/video', { id, title });
+      await refreshConfig();
     }
     $('#video-form').reset();
-    await refreshConfig();
     flash('Vídeo bloqueado.');
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) return;
