@@ -321,16 +321,26 @@ async function channel(channelId, pageToken) {
   if (isChannelBlocked(channelId)) {
     return { channel: { id: channelId, title: '' }, items: [], blocked: true, nextPageToken: null };
   }
-  let title = '';
+  let info = { id: channelId, title: '' };
   if (usingMock()) {
-    title = mockdata.CHANNELS.find((c) => c.id === channelId)?.title || '';
+    info.title = mockdata.CHANNELS.find((c) => c.id === channelId)?.title || '';
   } else {
-    const ch = await apiGet('/channels', { part: 'snippet', id: channelId });
-    title = ch.items?.[0]?.snippet?.title || '';
+    const ch = await apiGet('/channels', { part: 'snippet,statistics', id: channelId });
+    const item = ch.items?.[0];
+    const sn = item?.snippet;
+    const st = item?.statistics;
+    info = {
+      id: channelId,
+      title: sn?.title || '',
+      description: sn?.description || '',
+      thumbnail: sn?.thumbnails?.medium?.url || sn?.thumbnails?.default?.url || '',
+      subscriberCount: st?.hiddenSubscriberCount ? null : (st?.subscriberCount ?? null),
+      videoCount: st?.videoCount ?? null,
+    };
   }
   const { videos, nextPageToken } = await channelUploads(channelId, pageToken);
   const items = filterVideos(videos).map(stripDescription);
-  return { channel: { id: channelId, title }, items, blocked: false, nextPageToken };
+  return { channel: info, items, blocked: false, nextPageToken };
 }
 
 module.exports = {

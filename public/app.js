@@ -28,15 +28,23 @@ checkStatus();
 
 // ---------- Utilitários de formatação (pt-PT) ----------
 
+function formatCompact(n) {
+  if (n >= 1e9) return trimNum(n / 1e9) + ' mil M';
+  if (n >= 1e6) return trimNum(n / 1e6) + ' M';
+  if (n >= 1000) return trimNum(n / 1000) + ' mil';
+  return String(n);
+}
+
 function formatViews(views) {
   const n = Number(views);
   if (views == null || !Number.isFinite(n)) return null;
-  let valor;
-  if (n >= 1e9) valor = trimNum(n / 1e9) + ' mil M';
-  else if (n >= 1e6) valor = trimNum(n / 1e6) + ' M';
-  else if (n >= 1000) valor = trimNum(n / 1000) + ' mil';
-  else valor = String(n);
-  return `${valor} visualizações`;
+  return `${formatCompact(n)} visualizações`;
+}
+
+function formatSubscribers(count) {
+  const n = Number(count);
+  if (count == null || !Number.isFinite(n)) return null;
+  return `${formatCompact(n)} ${n === 1 ? 'inscrito' : 'inscritos'}`;
 }
 
 function trimNum(x) {
@@ -97,6 +105,36 @@ function videoCard(video) {
   a.appendChild(meta);
 
   return a;
+}
+
+function channelHeader(ch) {
+  const header = el('div', 'channel-header');
+
+  const avatar = el('div', 'channel-avatar-lg');
+  if (ch.thumbnail) {
+    const img = document.createElement('img');
+    img.src = ch.thumbnail;
+    img.alt = '';
+    avatar.appendChild(img);
+  } else {
+    avatar.textContent = (ch.title || '?').trim().charAt(0).toUpperCase() || '?';
+  }
+  header.appendChild(avatar);
+
+  const info = el('div', 'channel-header-info');
+  info.appendChild(el('h1', 'channel-header-title', ch.title || 'Canal'));
+
+  const stats = [formatSubscribers(ch.subscriberCount), ch.videoCount != null ? `${formatCompact(Number(ch.videoCount))} vídeos` : null]
+    .filter(Boolean);
+  if (stats.length) info.appendChild(el('div', 'channel-header-stats', stats.join(' • ')));
+
+  if (ch.description) {
+    const desc = el('p', 'channel-header-desc', ch.description);
+    info.appendChild(desc);
+  }
+
+  header.appendChild(info);
+  return header;
 }
 
 function channelCard(ch) {
@@ -394,11 +432,12 @@ async function viewChannel(id) {
       return;
     }
     app.replaceChildren();
-    app.appendChild(el('h1', 'page-title', data.channel?.title || 'Canal'));
+    app.appendChild(channelHeader(data.channel || {}));
     if (!data.items?.length) {
-      showMessage({ emoji: '📺', title: 'Este canal ainda não tem vídeos' });
+      app.appendChild(el('p', 'empty', 'Este canal ainda não tem vídeos.'));
       return;
     }
+    app.appendChild(el('h2', 'section-title', 'Vídeos'));
     const grid = videoGrid(data.items);
     app.appendChild(grid);
     let nextPageToken = data.nextPageToken || null;

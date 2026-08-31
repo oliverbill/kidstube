@@ -206,6 +206,57 @@ a { color: inherit; text-decoration: none; }
   line-height: 1.4;
 }
 
+.channel-header {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  margin-bottom: 28px;
+}
+
+.channel-avatar-lg {
+  flex-shrink: 0;
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--bg-hover);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32px;
+  font-weight: 600;
+}
+
+.channel-avatar-lg img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.channel-header-title {
+  font-size: 24px;
+  font-weight: 700;
+  margin: 0 0 6px;
+}
+
+.channel-header-stats {
+  font-size: 14px;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+
+.channel-header-desc {
+  font-size: 14px;
+  color: var(--text-dim);
+  line-height: 1.4;
+  margin: 0;
+  max-width: 640px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 .channel-avatar-thumb {
   aspect-ratio: 1 / 1;
   max-width: 140px;
