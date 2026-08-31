@@ -282,13 +282,27 @@ async function fetchAllSubscriptions(accessToken) {
   return channels.filter((c) => c.id);
 }
 
+// Canal da própria família (@danadinhos) — a conta não está inscrita nele (raro um
+// dono se autoinscrever), por isso subscriptions.list nunca o traria; fica sempre
+// presente, independente do estado real da inscrição.
+const PINNED_CHANNELS = [
+  {
+    id: 'UCNu1shC7iRpk6is5RETRrxg',
+    title: 'Os Danadinhos',
+    thumbnail: 'https://yt3.ggpht.com/bcxKzSL-P8aFjYMdF2DZH7hYf77JI9W4MkByp7rAhW7O8UI1e7FeHLExupXUF7GbprFZWonQElk=s240-c-k-c0x00ffffff-no-rj',
+  },
+];
+
 async function getSubscriptionsCached(env) {
   const cached = await env.PIN_KV.get('subs_cache', 'json');
   if (cached && Date.now() - cached.at < SUBS_CACHE_TTL_MS) return cached.channels;
 
   const accessToken = await getGoogleAccessToken(env);
-  if (!accessToken) return [];
-  const channels = await fetchAllSubscriptions(accessToken);
+  const fetched = accessToken ? await fetchAllSubscriptions(accessToken) : [];
+  const channels = [
+    ...PINNED_CHANNELS,
+    ...fetched.filter((c) => !PINNED_CHANNELS.some((p) => p.id === c.id)),
+  ];
   await env.PIN_KV.put('subs_cache', JSON.stringify({ at: Date.now(), channels }));
   return channels;
 }
