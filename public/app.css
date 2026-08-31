@@ -74,6 +74,20 @@ a { color: inherit; text-decoration: none; }
   letter-spacing: -0.5px;
 }
 
+.topnav {
+  display: flex;
+  gap: 20px;
+  flex-shrink: 0;
+}
+
+.topnav a {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-dim);
+}
+
+.topnav a:hover { color: var(--text); }
+
 .search {
   display: flex;
   flex: 1;
@@ -190,6 +204,16 @@ a { color: inherit; text-decoration: none; }
   font-size: 13px;
   color: var(--text-dim);
   line-height: 1.4;
+}
+
+.channel-avatar-thumb {
+  aspect-ratio: 1 / 1;
+  max-width: 140px;
+  border-radius: 50%;
+}
+
+.channel-card .card-title {
+  text-align: center;
 }
 
 /* ---------- Watch ---------- */

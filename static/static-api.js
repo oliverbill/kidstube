@@ -230,6 +230,50 @@
     }
   }
 
+  // ---------- Inscrições (subscriptions.list via Worker, conta ligada em Definições) ----------
+
+  // Mesma URL que admin.js — duplicada porque os dois ficheiros não partilham
+  // módulo (carregados como scripts soltos). Ver worker/src/index.js.
+  const WORKER_BASE = 'https://kidstube-admin.alves-bill.workers.dev';
+  const SUBS_TTL_MS = 30 * 60 * 1000;
+  const SUBS_CACHE_KEY = 'kidtube-subs-cache';
+
+  let subsMem = null; // { at, channels }
+
+  function readSubsCacheFromStorage() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(SUBS_CACHE_KEY));
+      if (Array.isArray(raw?.channels)) return raw;
+    } catch { /* ignora cache corrompida */ }
+    return null;
+  }
+
+  function writeSubsCacheToStorage(channels) {
+    try {
+      localStorage.setItem(SUBS_CACHE_KEY, JSON.stringify({ at: Date.now(), channels }));
+    } catch { /* localStorage indisponível/cheio: cache fica só em memória */ }
+  }
+
+  async function getSubscriptions() {
+    if (subsMem && Date.now() - subsMem.at < SUBS_TTL_MS) return subsMem.channels;
+    try {
+      const res = await originalFetch(`${WORKER_BASE}/subscriptions`, { cache: 'no-store' });
+      if (!res.ok) throw new Error(`subscriptions ${res.status}`);
+      const data = await res.json();
+      const channels = Array.isArray(data.channels) ? data.channels : [];
+      subsMem = { at: Date.now(), channels };
+      writeSubsCacheToStorage(channels);
+      return channels;
+    } catch {
+      const fallback = subsMem || readSubsCacheFromStorage();
+      if (fallback) {
+        subsMem = { at: Date.now(), channels: fallback.channels };
+        return fallback.channels;
+      }
+      return [];
+    }
+  }
+
   // ---------- Normalização / filtragem (idêntico a server/youtube.js) ----------
 
   function normalize(s) {
@@ -399,12 +443,46 @@
     return !effectiveApiKey(getConfig());
   }
 
+  // Uploads recentes dos canais inscritos (máx. 15 canais, 10 vídeos cada — sem
+  // enrich() de propósito, para poupar quota; falta duration/views nesses cards, que
+  // videoCard() já trata como opcional). Devolve null se não há conta ligada/inscrições.
+  async function subscriptionsFeedPage(blocked) {
+    const subs = await getSubscriptions();
+    if (!subs.length) return null;
+    const perChannel = await Promise.all(subs.slice(0, 15).map(async (ch) => {
+      try {
+        const chData = await apiGet('/channels', { part: 'contentDetails', id: ch.id });
+        const uploads = chData.items?.[0]?.contentDetails?.relatedPlaylists?.uploads;
+        if (!uploads) return [];
+        const pl = await apiGet('/playlistItems', { part: 'snippet,contentDetails', playlistId: uploads, maxResults: 10 });
+        return (pl.items || [])
+          .filter((it) => it.contentDetails?.videoId)
+          .map((it) => videoFromSnippet(it.contentDetails.videoId, it.snippet, null));
+      } catch {
+        return [];
+      }
+    }));
+    const merged = perChannel.flat().sort(
+      (a, b) => new Date(b.publishedAt || 0) - new Date(a.publishedAt || 0),
+    );
+    return filterVideos(merged, blocked).map(stripDescription);
+  }
+
   async function home(pageToken) {
     if (usingMock()) {
       const blocked = await getBlocklist();
       return { items: filterVideos(MOCK_VIDEOS.slice(), blocked).map(stripDescription), nextPageToken: null };
     }
     const blocked = await getBlocklist();
+
+    // Fase 0 (só no 1º carregamento): uploads recentes dos canais inscritos (conta
+    // ligada em Definições → "Conta do YouTube"). É a aproximação mais próxima que a
+    // API do YouTube permite de "sugestões" — não há endpoint público de recomendações
+    // personalizadas. Sem conta ligada ou sem inscrições, cai direto na Fase 1.
+    if (!pageToken) {
+      const subItems = await subscriptionsFeedPage(blocked);
+      if (subItems && subItems.length) return { items: subItems, nextPageToken: 'mp:' };
+    }
 
     // Fase 1: chart=mostPopular (o mesmo catálogo que a home do YouTube usa).
     if (!pageToken || pageToken.startsWith('mp:')) {
@@ -648,6 +726,9 @@
           mock: usingMock(),
           static: true,
         });
+      }
+      if (method === 'GET' && pathname === '/api/subscriptions') {
+        return json({ channels: await getSubscriptions() });
       }
 
       // ----- Admin -----

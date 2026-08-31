@@ -99,6 +99,28 @@ function videoCard(video) {
   return a;
 }
 
+function channelCard(ch) {
+  const a = el('a', 'card channel-card');
+  a.href = `#channel/${encodeURIComponent(ch.id)}`;
+  const avatar = el('div', 'thumb channel-avatar-thumb');
+  if (ch.thumbnail) {
+    const img = document.createElement('img');
+    img.src = ch.thumbnail;
+    img.alt = '';
+    img.loading = 'lazy';
+    avatar.appendChild(img);
+  }
+  a.appendChild(avatar);
+  a.appendChild(el('h3', 'card-title', ch.title || '(sem título)'));
+  return a;
+}
+
+function channelGrid(items) {
+  const grid = el('div', 'grid');
+  for (const ch of items) grid.appendChild(channelCard(ch));
+  return grid;
+}
+
 function videoGrid(items) {
   const grid = el('div', 'grid');
   for (const v of items) grid.appendChild(videoCard(v));
@@ -159,6 +181,35 @@ async function apiGet(path) {
   const res = await fetch(path);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
+}
+
+// ---------- Histórico (por dispositivo — o que foi assistido nesta app; a API do
+// YouTube não expõe o histórico real de nenhuma conta, com ou sem OAuth) ----------
+
+const HISTORY_KEY = 'kidtube-history';
+const HISTORY_MAX = 200;
+
+function readHistory() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(HISTORY_KEY));
+    return Array.isArray(raw) ? raw : [];
+  } catch {
+    return [];
+  }
+}
+
+function recordHistory(video) {
+  const list = readHistory().filter((v) => v.id !== video.id);
+  list.unshift({
+    id: video.id,
+    title: video.title || '',
+    thumbnail: video.thumbnail || '',
+    channelTitle: video.channelTitle || '',
+    watchedAt: new Date().toISOString(),
+  });
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(list.slice(0, HISTORY_MAX)));
+  } catch { /* localStorage indisponível/cheio: histórico fica só nesta sessão */ }
 }
 
 // ---------- Scroll infinito ----------
@@ -295,6 +346,7 @@ async function viewWatch(id) {
       return;
     }
     const v = data.video;
+    recordHistory(v);
     app.replaceChildren();
     const wrap = el('div', 'watch');
 
@@ -364,6 +416,42 @@ async function viewChannel(id) {
   } catch {
     if (seq === renderSeq) showError(() => viewChannel(id));
   }
+}
+
+async function viewSubscriptions() {
+  const seq = ++renderSeq;
+  stopInfiniteScroll();
+  showSkeletonGrid();
+  try {
+    const data = await apiGet('/api/subscriptions');
+    if (seq !== renderSeq) return;
+    app.replaceChildren();
+    app.appendChild(el('h1', 'page-title', 'Inscrições'));
+    if (!data.channels?.length) {
+      showMessage({
+        emoji: '📺',
+        title: 'Sem inscrições',
+        text: 'Liga a conta do YouTube em Definições para trazer os canais inscritos.',
+      });
+      return;
+    }
+    app.appendChild(channelGrid(data.channels));
+  } catch {
+    if (seq === renderSeq) showError(viewSubscriptions);
+  }
+}
+
+function viewHistory() {
+  ++renderSeq;
+  stopInfiniteScroll();
+  app.replaceChildren();
+  app.appendChild(el('h1', 'page-title', 'Histórico'));
+  const items = readHistory();
+  if (!items.length) {
+    showMessage({ emoji: '🕘', title: 'Ainda sem histórico', text: 'Os vídeos que vires aqui aparecem nesta lista.' });
+    return;
+  }
+  app.appendChild(videoGrid(items));
 }
 
 // ---------- Router por hash ----------
@@ -525,6 +613,8 @@ function route() {
   if (name === 'search' && arg) viewSearch(arg);
   else if (name === 'watch' && arg) viewWatch(arg);
   else if (name === 'channel' && arg) viewChannel(arg);
+  else if (name === 'subscriptions') viewSubscriptions();
+  else if (name === 'history') viewHistory();
   else viewHome();
 }
 

@@ -241,6 +241,11 @@ async function showAdminScreen() {
   $('#pin-screen').hidden = true;
   $('#admin-screen').hidden = false;
   await refreshConfig();
+  if (location.hash === '#oauth=ok' || location.hash === '#oauth=erro') {
+    flash(location.hash === '#oauth=ok' ? 'Conta do YouTube ligada.' : 'Não consegui ligar a conta — tenta de novo.',
+      location.hash === '#oauth=erro');
+    history.replaceState(null, '', location.pathname + location.search);
+  }
 }
 
 // Fallback do "Voltar à app": em fase de captura, força a navegação mesmo que
@@ -260,6 +265,7 @@ async function boot() {
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js').catch(() => { /* PWA opcional */ });
   }
+  if (!IS_STATIC) $('#youtube-account-block')?.remove();
   let status;
   try {
     status = IS_STATIC
@@ -353,6 +359,22 @@ async function refreshConfig() {
   }
   renderLists();
   renderSettings();
+  if (IS_STATIC) await renderYoutubeAccountStatus();
+}
+
+async function renderYoutubeAccountStatus() {
+  const el = $('#youtube-account-status');
+  const link = $('#youtube-account-connect');
+  if (!el || !link) return;
+  link.href = `${WORKER_BASE}/oauth/start`;
+  try {
+    const { connected } = await workerFetch('/oauth/status', undefined, { method: 'GET', noPin: true });
+    el.textContent = connected
+      ? 'Conta ligada ✓ — liga outra para a substituir.'
+      : 'Nenhuma conta ligada — a home e as inscrições ficam vazias até ligares uma.';
+  } catch (err) {
+    el.textContent = `Não foi possível verificar o estado (${err.message}).`;
+  }
 }
 
 // Aplica diretamente o `blocked` devolvido pelo Worker após uma mutação — relê-lo

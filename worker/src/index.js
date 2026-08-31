@@ -12,6 +12,10 @@
 //   POST /pin               { pin } -> 1ª vez define; depois exige X-Pin válido
 //   POST /verify            (X-Pin) -> 'ok' | 401 | 429
 //   POST /blocklist/mutate  { op, payload, message } (X-Pin) -> { blocked }
+//   GET  /oauth/start       -> redireciona para o consentimento do Google
+//   GET  /oauth/callback    -> troca code por tokens, grava refresh_token no KV
+//   GET  /oauth/status      -> { connected }
+//   GET  /subscriptions     -> { channels } (lista real via subscriptions.list)
 
 const GH_OWNER = 'oliverbill';
 const GH_REPO = 'kidstube';
@@ -26,6 +30,12 @@ const MAX_FAILURES = 5;
 const LOCK_MS = 60_000;
 
 const EMPTY_BLOCKLIST = { channels: [], keywords: [], videos: [] };
+
+const ADMIN_URL = 'https://oliverbill.github.io/kidstube/admin.html';
+const OAUTH_REDIRECT_URI = 'https://kidstube-admin.alves-bill.workers.dev/oauth/callback';
+const GOOGLE_SCOPE = 'https://www.googleapis.com/auth/youtube.readonly';
+const OAUTH_STATE_TTL_S = 300;
+const SUBS_CACHE_TTL_MS = 30 * 60 * 1000;
 
 function corsHeaders(request) {
   const origin = request.headers.get('Origin') || '';
@@ -205,6 +215,85 @@ async function mutateBlocklist(env, op, payload, message) {
 }
 
 // ---------------------------------------------------------------------------
+// OAuth Google + subscriptions.list (inscrições reais da conta ligada)
+// ---------------------------------------------------------------------------
+
+function randomState() {
+  return Array.from(crypto.getRandomValues(new Uint8Array(24)), (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function getGoogleState(env) {
+  return (await env.PIN_KV.get('google_oauth', 'json')) || null;
+}
+
+async function putGoogleState(env, state) {
+  await env.PIN_KV.put('google_oauth', JSON.stringify(state));
+}
+
+// Troca o refresh_token por um access_token válido, reaproveitando o guardado
+// no KV enquanto não expirar.
+async function getGoogleAccessToken(env) {
+  const state = await getGoogleState(env);
+  if (!state?.refresh_token) return null;
+  if (state.access_token && state.expiresAt > Date.now() + 60_000) return state.access_token;
+
+  const res = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: env.GOOGLE_CLIENT_ID,
+      client_secret: env.GOOGLE_CLIENT_SECRET,
+      refresh_token: state.refresh_token,
+      grant_type: 'refresh_token',
+    }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error_description || data.error || 'Falha ao renovar o token do Google.');
+
+  state.access_token = data.access_token;
+  state.expiresAt = Date.now() + (data.expires_in || 3600) * 1000;
+  await putGoogleState(env, state);
+  return state.access_token;
+}
+
+async function fetchAllSubscriptions(accessToken) {
+  const channels = [];
+  let pageToken;
+  do {
+    const url = new URL('https://www.googleapis.com/youtube/v3/subscriptions');
+    url.searchParams.set('part', 'snippet');
+    url.searchParams.set('mine', 'true');
+    url.searchParams.set('maxResults', '50');
+    url.searchParams.set('order', 'alphabetical');
+    if (pageToken) url.searchParams.set('pageToken', pageToken);
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error?.message || `subscriptions.list ${res.status}`);
+    for (const item of data.items || []) {
+      const sn = item.snippet;
+      channels.push({
+        id: sn.resourceId?.channelId,
+        title: sn.title || '',
+        thumbnail: sn.thumbnails?.default?.url || sn.thumbnails?.medium?.url || '',
+      });
+    }
+    pageToken = data.nextPageToken || null;
+  } while (pageToken);
+  return channels.filter((c) => c.id);
+}
+
+async function getSubscriptionsCached(env) {
+  const cached = await env.PIN_KV.get('subs_cache', 'json');
+  if (cached && Date.now() - cached.at < SUBS_CACHE_TTL_MS) return cached.channels;
+
+  const accessToken = await getGoogleAccessToken(env);
+  if (!accessToken) return [];
+  const channels = await fetchAllSubscriptions(accessToken);
+  await env.PIN_KV.put('subs_cache', JSON.stringify({ at: Date.now(), channels }));
+  return channels;
+}
+
+// ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
 
@@ -251,6 +340,62 @@ export default {
         const body = await readBody(request);
         const blocked = await mutateBlocklist(env, body.op, body.payload, body.message || body.op);
         return json(request, { blocked });
+      }
+
+      if (request.method === 'GET' && pathname === '/oauth/start') {
+        const state = randomState();
+        await env.PIN_KV.put(`oauth_state:${state}`, '1', { expirationTtl: OAUTH_STATE_TTL_S });
+        const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+        authUrl.searchParams.set('client_id', env.GOOGLE_CLIENT_ID);
+        authUrl.searchParams.set('redirect_uri', OAUTH_REDIRECT_URI);
+        authUrl.searchParams.set('response_type', 'code');
+        authUrl.searchParams.set('scope', GOOGLE_SCOPE);
+        authUrl.searchParams.set('access_type', 'offline');
+        authUrl.searchParams.set('prompt', 'consent');
+        authUrl.searchParams.set('state', state);
+        return Response.redirect(authUrl.toString(), 302);
+      }
+
+      if (request.method === 'GET' && pathname === '/oauth/callback') {
+        const state = url.searchParams.get('state') || '';
+        const code = url.searchParams.get('code') || '';
+        const stateKey = `oauth_state:${state}`;
+        const stateOk = state && await env.PIN_KV.get(stateKey);
+        if (!stateOk || !code) return Response.redirect(`${ADMIN_URL}#oauth=erro`, 302);
+        await env.PIN_KV.delete(stateKey);
+
+        const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            client_id: env.GOOGLE_CLIENT_ID,
+            client_secret: env.GOOGLE_CLIENT_SECRET,
+            code,
+            grant_type: 'authorization_code',
+            redirect_uri: OAUTH_REDIRECT_URI,
+          }),
+        });
+        const tokenData = await tokenRes.json();
+        if (!tokenRes.ok || !tokenData.refresh_token) {
+          return Response.redirect(`${ADMIN_URL}#oauth=erro`, 302);
+        }
+        await putGoogleState(env, {
+          refresh_token: tokenData.refresh_token,
+          access_token: tokenData.access_token,
+          expiresAt: Date.now() + (tokenData.expires_in || 3600) * 1000,
+        });
+        await env.PIN_KV.delete('subs_cache'); // força refrescar a lista com a conta nova
+        return Response.redirect(`${ADMIN_URL}#oauth=ok`, 302);
+      }
+
+      if (request.method === 'GET' && pathname === '/oauth/status') {
+        const state = await getGoogleState(env);
+        return json(request, { connected: !!state?.refresh_token });
+      }
+
+      if (request.method === 'GET' && pathname === '/subscriptions') {
+        const channels = await getSubscriptionsCached(env);
+        return json(request, { channels });
       }
 
       return json(request, { error: 'Não encontrado' }, 404);
