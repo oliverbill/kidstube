@@ -162,27 +162,13 @@ function registerFailure() {
 
 // ---------- API key / região ----------
 
-function setApiKey(apiKey) {
-  const cfg = load();
-  cfg.apiKey = String(apiKey || '');
-  save();
-}
-
-// A chave pode vir de duas origens: do ambiente (secret do sistema, para não ser
-// preciso colá-la em cada instalação) ou do painel. A do painel ganha, seguindo o
-// que a variante estática já fazia com a chave injectada no build — assim dá para
-// trocar de chave sem mexer no servidor. Devolver a chave colada só quando não
-// está vazia é o que torna "apagar no painel" equivalente a "voltar ao ambiente".
+// A chave vem só do ambiente: uma origem, trocada onde os outros segredos são
+// tratados. O painel não a define — mostra apenas se está lá.
+//
+// O `apiKey` do config.json fica como resgate de instalações antigas, onde a chave
+// foi colada no painel antes de este caminho existir. Nada a escreve agora.
 function getApiKey() {
-  return load().apiKey || process.env.KIDTUBE_API_KEY || process.env.YOUTUBE_API_KEY || '';
-}
-
-// 'painel' | 'ambiente' | 'nenhuma' — para a administração poder dizer de onde vem
-// a chave em uso, em vez de deixar isso por adivinhar.
-function apiKeySource() {
-  if (load().apiKey) return 'painel';
-  if (process.env.KIDTUBE_API_KEY || process.env.YOUTUBE_API_KEY) return 'ambiente';
-  return 'nenhuma';
+  return process.env.KIDTUBE_API_KEY || process.env.YOUTUBE_API_KEY || load().apiKey || '';
 }
 
 // ---------- Blocklist ----------
@@ -243,9 +229,7 @@ module.exports = {
   markPinResetSent,
   consumePinReset,
   resetCooldownMs,
-  setApiKey,
   getApiKey,
-  apiKeySource,
   blockChannel,
   unblockChannel,
   blockKeyword,

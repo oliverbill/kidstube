@@ -567,16 +567,10 @@ async function handleApi(req, res, url) {
     const cfg = store.getConfig();
     return sendJson(res, 200, {
       apiKeySet: Boolean(store.getApiKey()),
-      apiKeySource: store.apiKeySource(),
+
       blocked: cfg.blocked,
       safeSearch: cfg.safeSearch,
     });
-  }
-
-  if (method === 'POST' && p === '/api/admin/apikey') {
-    const body = await readBody(req);
-    store.setApiKey(body.apiKey);
-    return sendJson(res, 200, { ok: true });
   }
 
   if (method === 'POST' && p === '/api/admin/block/channel') {

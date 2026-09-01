@@ -22,7 +22,7 @@ O painel de administração não tem link nenhum dentro da app — abre-o digita
 diretamente: `http://<ip-do-mac>:8478/admin.html`.
 
 1. Define o **PIN** parental na primeira vez.
-2. Em **Definições**, cola a tua **chave da YouTube Data API v3**
+2. Define a **chave da YouTube Data API v3** na variável de ambiente `KIDTUBE_API_KEY`
    (console.cloud.google.com → ativar *YouTube Data API v3* → Credenciais → API key).
    Sem chave, a app funciona em **modo demonstração** com vídeos fictícios.
 3. Gere as listas nas tabs: canais, temas (palavras‑chave) e vídeos bloqueados.
@@ -100,7 +100,7 @@ Variáveis:
 | `KIDTUBE_COOKIES` | *(vazio)* | `cookies.txt` da conta do YouTube |
 | `KIDTUBE_GOOGLE_STATE` | `.google-oauth.json` | Onde fica o `refresh_token` do Google |
 | `GOOGLE_CLIENT_ID` / `_SECRET` | *(vazio)* | OAuth da conta; sem isto não há inscrições |
-| `KIDTUBE_API_KEY` | *(vazio)* | Chave da YouTube Data API v3; evita colá-la no painel |
+| `KIDTUBE_API_KEY` | *(vazio)* | Chave da YouTube Data API v3 — única origem; sem ela, modo demonstração |
 | `KIDTUBE_RESET_EMAIL` | *(vazio)* | Caixa que recebe o link de reposição do PIN |
 | `KIDTUBE_SMTP_HOST/PORT/USER/PASS` | `smtp.gmail.com`, `465` | Envio do email; no Gmail a `PASS` é uma palavra-passe de aplicação |
 | `KIDTUBE_MAX_HEIGHT` | `1080` | Tecto de qualidade |
@@ -117,7 +117,7 @@ ssh gomide-vps 'curl -s http://127.0.0.1:8478/api/status'
 ```
 
 O container escuta em `127.0.0.1:8478` — nenhuma porta é aberta no firewall, tal como o resto
-do que corre nesta máquina. O `data/` (PIN, chave da API, bloqueios) e o estado do OAuth vivem
+do que corre nesta máquina. O `data/` (PIN e bloqueios) e o estado do OAuth vivem
 em volumes, por isso sobrevivem a `--build`.
 
 ### 4. Publicar o endereço
@@ -132,10 +132,9 @@ máquina).
 Em `https://kidstube.oliversys.tech/admin.html`:
 
 1. Definir o **PIN** parental.
-2. A chave da **YouTube Data API v3** vem do `KIDTUBE_API_KEY` do servidor — não é preciso
-   colar nada em aparelho nenhum, e ela nunca chega ao browser. Se estiver vazia, a app fica em
-   modo demonstração e o painel aceita uma chave colada à mão (que se sobrepõe à do servidor;
-   apagá-la volta a usar a do servidor).
+2. A chave da **YouTube Data API v3** vem do `KIDTUBE_API_KEY` do servidor — não há onde a colar
+   no painel, e ela nunca chega ao browser. Trocá-la é editar essa variável e reiniciar. Vazia,
+   a app fica em modo demonstração; o painel diz apenas se está definida.
 3. **Definições** → **Ligar conta** para autorizar o `alves.bill@gmail.com` e trazer as
    inscrições. O `redirect_uri` `https://kidstube.oliversys.tech/api/oauth/callback` tem de
    estar registado na consola do Google Cloud, senão o Google recusa.

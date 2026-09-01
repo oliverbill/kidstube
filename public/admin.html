@@ -133,16 +133,11 @@
       <section id="tab-settings" class="tab-panel" role="tabpanel" hidden>
         <h2>Definições</h2>
 
-        <!-- Removido do build estático (chave fixa vem do deploy) — ver scripts/build-static.mjs -->
+        <!-- Só estado: a chave vive no ambiente do servidor (KIDTUBE_API_KEY) e
+             troca-se lá. Sem campo aqui, não há duas origens a competir. -->
         <div class="settings-block" id="apikey-block">
           <h3>Chave da API do YouTube</h3>
           <p id="apikey-status" class="hint"></p>
-          <form id="apikey-form" class="add-form" autocomplete="off">
-            <input id="apikey-input" type="password" autocomplete="off"
-                   placeholder="Colar nova chave da API">
-            <button type="submit" class="btn btn-primary">Guardar chave</button>
-          </form>
-          <p id="apikey-error" class="error" hidden></p>
         </div>
 
         <!-- Só existe na variante estática (GitHub Pages); ligado ao Worker (ver worker/). -->

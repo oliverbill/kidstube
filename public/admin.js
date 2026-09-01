@@ -568,12 +568,10 @@ function renderSettings() {
     const ok = document.createElement('span');
     ok.className = 'apikey-ok';
     ok.textContent = 'configurada ✓';
-    // Dizer a origem evita o mistério de ver "configurada" sem nunca a ter colado.
-    status.append('Chave da API: ', ok, cfg.apiKeySource === 'ambiente'
-      ? ' — vem do servidor (KIDTUBE_API_KEY). Cole uma aqui só para a substituir neste servidor.'
-      : ' — introduza uma nova para a substituir.');
+    status.append('Chave da API: ', ok, ' — definida em KIDTUBE_API_KEY, no servidor.');
   } else {
-    status.textContent = 'Sem chave configurada — a app está em modo demonstração.';
+    status.textContent =
+      'Sem chave — a app está em modo demonstração. Define KIDTUBE_API_KEY no servidor.';
   }
 }
 
@@ -736,25 +734,6 @@ $('#video-form').addEventListener('submit', async (ev) => {
 // ---------------------------------------------------------------------------
 // Definições
 // ---------------------------------------------------------------------------
-
-$('#apikey-form')?.addEventListener('submit', async (ev) => {
-  ev.preventDefault();
-  showError('#apikey-error', '');
-  const apiKey = $('#apikey-input').value.trim();
-  if (!apiKey) {
-    showError('#apikey-error', 'Cole a chave da API antes de guardar.');
-    return;
-  }
-  try {
-    await api('POST', '/api/admin/apikey', { apiKey });
-    $('#apikey-form').reset();
-    await refreshConfig();
-    flash('Chave da API guardada.');
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 401) return;
-    showError('#apikey-error', err.message);
-  }
-});
 
 // Resolvedor de streams (reprodução sem anúncios). Fica no localStorage deste
 // aparelho — não passa pelo servidor nem pela blocklist partilhada.
