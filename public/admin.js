@@ -568,7 +568,10 @@ function renderSettings() {
     const ok = document.createElement('span');
     ok.className = 'apikey-ok';
     ok.textContent = 'configurada ✓';
-    status.append('Chave da API: ', ok, ' — introduza uma nova para a substituir.');
+    // Dizer a origem evita o mistério de ver "configurada" sem nunca a ter colado.
+    status.append('Chave da API: ', ok, cfg.apiKeySource === 'ambiente'
+      ? ' — vem do servidor (KIDTUBE_API_KEY). Cole uma aqui só para a substituir neste servidor.'
+      : ' — introduza uma nova para a substituir.');
   } else {
     status.textContent = 'Sem chave configurada — a app está em modo demonstração.';
   }

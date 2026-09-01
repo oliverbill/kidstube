@@ -31,12 +31,11 @@ const CACHE_TTL_MS = 10 * 60 * 1000;
 const cache = new Map(); // url -> { at, data }
 
 async function apiGet(pathname, params) {
-  const cfg = store.getConfig();
   const url = new URL(API_BASE + pathname);
   for (const [k, v] of Object.entries(params)) {
     if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, String(v));
   }
-  url.searchParams.set('key', cfg.apiKey);
+  url.searchParams.set('key', store.getApiKey());
   const key = url.toString();
 
   const hit = cache.get(key);
@@ -149,7 +148,7 @@ async function enrich(videos) {
 // ---------- Modo mock ----------
 
 function usingMock() {
-  return !store.getConfig().apiKey;
+  return !store.getApiKey();
 }
 
 // Remove campos internos (usados só para filtragem) antes de responder ao cliente.

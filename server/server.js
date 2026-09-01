@@ -407,9 +407,8 @@ async function handleApi(req, res, url) {
   // -------- Público --------
 
   if (method === 'GET' && p === '/api/status') {
-    const cfg = store.getConfig();
     return sendJson(res, 200, {
-      hasApiKey: Boolean(cfg.apiKey),
+      hasApiKey: Boolean(store.getApiKey()),
       hasPin: store.hasPin(),
       mock: yt.usingMock(),
       // Diz à app que este servidor resolve streams: servida daqui, ela usa o
@@ -567,7 +566,8 @@ async function handleApi(req, res, url) {
   if (method === 'GET' && p === '/api/admin/config') {
     const cfg = store.getConfig();
     return sendJson(res, 200, {
-      apiKeySet: Boolean(cfg.apiKey),
+      apiKeySet: Boolean(store.getApiKey()),
+      apiKeySource: store.apiKeySource(),
       blocked: cfg.blocked,
       safeSearch: cfg.safeSearch,
     });

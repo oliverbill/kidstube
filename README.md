@@ -100,6 +100,7 @@ Variáveis:
 | `KIDTUBE_COOKIES` | *(vazio)* | `cookies.txt` da conta do YouTube |
 | `KIDTUBE_GOOGLE_STATE` | `.google-oauth.json` | Onde fica o `refresh_token` do Google |
 | `GOOGLE_CLIENT_ID` / `_SECRET` | *(vazio)* | OAuth da conta; sem isto não há inscrições |
+| `KIDTUBE_API_KEY` | *(vazio)* | Chave da YouTube Data API v3; evita colá-la no painel |
 | `KIDTUBE_RESET_EMAIL` | *(vazio)* | Caixa que recebe o link de reposição do PIN |
 | `KIDTUBE_SMTP_HOST/PORT/USER/PASS` | `smtp.gmail.com`, `465` | Envio do email; no Gmail a `PASS` é uma palavra-passe de aplicação |
 | `KIDTUBE_MAX_HEIGHT` | `1080` | Tecto de qualidade |
@@ -131,8 +132,10 @@ máquina).
 Em `https://kidstube.oliversys.tech/admin.html`:
 
 1. Definir o **PIN** parental.
-2. **Definições** → colar a chave da **YouTube Data API v3**. Sem ela a app fica em modo
-   demonstração.
+2. A chave da **YouTube Data API v3** vem do `KIDTUBE_API_KEY` do servidor — não é preciso
+   colar nada em aparelho nenhum, e ela nunca chega ao browser. Se estiver vazia, a app fica em
+   modo demonstração e o painel aceita uma chave colada à mão (que se sobrepõe à do servidor;
+   apagá-la volta a usar a do servidor).
 3. **Definições** → **Ligar conta** para autorizar o `alves.bill@gmail.com` e trazer as
    inscrições. O `redirect_uri` `https://kidstube.oliversys.tech/api/oauth/callback` tem de
    estar registado na consola do Google Cloud, senão o Google recusa.
@@ -144,6 +147,7 @@ Em `https://kidstube.oliversys.tech/admin.html`:
 Não é preciso configurar resolvedor nenhum: servida deste servidor, a app descobre-o sozinha
 pelo `/api/status`. A secção "Reprodução sem anúncios" da administração só faz falta quando a
 app é servida de outro sítio.
+
 ### Esquecer o PIN
 
 O ecrã do PIN tem **"Esqueci-me do PIN"**, que envia um link para a caixa em
