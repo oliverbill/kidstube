@@ -94,7 +94,7 @@ function requirePin(req, res) {
 
 // ---------- Estáticos ----------
 
-function serveStatic(res, urlPath) {
+function serveStatic(req, res, urlPath) {
   let rel = decodeURIComponent(urlPath);
   if (rel === '/') rel = '/index.html';
   const filePath = path.normalize(path.join(PUBLIC_DIR, rel));
@@ -114,10 +114,28 @@ function serveStatic(res, urlPath) {
     return;
   }
   const ext = path.extname(filePath).toLowerCase();
+
+  // Sem Cache-Control explícito, a Cloudflare aplica o prazo dela a qualquer .js ou
+  // .css — foram 4 horas a servir uma versão antiga do painel depois de um deploy.
+  // O código da app revalida sempre (é barato: um 304 quando não mudou); as imagens,
+  // que mudam de nome quando mudam de conteúdo, podem ficar em cache muito tempo.
+  const revalidate = ['.html', '.js', '.css', '.webmanifest'].includes(ext);
+
+  // ETag por mtime+tamanho: chega para o browser e a Cloudflare responderem 304 sem
+  // transferir o corpo, e não obriga a ler o ficheiro para o resumir.
+  const etag = `W/"${stat.size.toString(16)}-${stat.mtimeMs.toString(16)}"`;
+  if (req.headers['if-none-match'] === etag) {
+    res.writeHead(304, { ETag: etag, 'Cache-Control': 'no-cache' });
+    return res.end();
+  }
+
   res.writeHead(200, {
     'Content-Type': CONTENT_TYPES[ext] || 'application/octet-stream',
     'Content-Length': stat.size,
+    'Cache-Control': revalidate ? 'no-cache' : 'public, max-age=604800',
+    ETag: etag,
   });
+  if (req.method === 'HEAD') return res.end();
   fs.createReadStream(filePath).pipe(res);
 }
 
@@ -647,7 +665,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       return sendError(res, 405, 'Método não permitido.');
     }
-    serveStatic(res, url.pathname);
+    serveStatic(req, res, url.pathname);
   } catch (err) {
     const status = err.status || 500;
     if (!res.headersSent) sendError(res, status, err.message || 'Erro interno.');
