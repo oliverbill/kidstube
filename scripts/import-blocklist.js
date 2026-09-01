@@ -7,6 +7,11 @@
 //   node scripts/import-blocklist.js [caminho/para/blocklist.json]
 //
 // Idempotente: correr duas vezes não duplica nada.
+//
+// ATENÇÃO: corre num processo à parte do servidor, que tem a configuração em
+// memória. Escrever aqui não avisa quem está a correr — e a próxima gravação do
+// servidor sobrepõe-se ao que este script escreveu. Por isso o container é
+// reiniciado no fim, para o servidor reler o ficheiro.
 
 const path = require('node:path');
 const store = require('../server/store');
@@ -41,3 +46,8 @@ for (const v of list.videos || []) {
 const b = store.getConfig().blocked;
 console.log(`Importados ${novos} novos, ${jaLa} já existiam.`);
 console.log(`Total no servidor: ${b.channels.length} canais, ${b.keywords.length} temas, ${b.videos.length} vídeos.`);
+if (novos > 0) {
+  console.log('\nReinicia o servidor para ele reler o ficheiro, senão a próxima');
+  console.log('gravação no painel sobrepõe-se a esta importação:');
+  console.log('  docker compose -f deploy/docker-compose.yml restart');
+}
