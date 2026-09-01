@@ -3,23 +3,26 @@
 Clone do YouTube com controlo parental: bloqueia **canais**, **temas (palavras-chave)** e
 **vídeos específicos**. O filtro corre no servidor, por isso não é contornável a partir do iPad.
 
-## Arrancar
+Corre num VPS, em `https://kidstube.oliversys.tech` — o iPad funciona em qualquer rede, não só
+em casa. Ver "Reprodução sem anúncios" para a instalação completa.
+
+## Arrancar localmente
 
 ```sh
-node server/server.js
+KIDTUBE_API_KEY='<a-tua-chave>' node server/server.js
 ```
 
-Servidor em `http://<ip-do-mac>:8478`. Sem dependências npm — só Node ≥ 18.
+Servidor em `http://localhost:8478`. Sem dependências npm — só Node ≥ 18.
 
 ## Instalar no iPad
 
-1. No Safari do iPad (na mesma rede Wi‑Fi), abre `http://<ip-do-mac>:8478`.
+1. No Safari do iPad, abre `https://kidstube.oliversys.tech`.
 2. Partilhar → **Adicionar ao ecrã principal**. Fica como app ("KidTube").
 
 ## Configurar
 
 O painel de administração não tem link nenhum dentro da app — abre-o digitando o URL
-diretamente: `http://<ip-do-mac>:8478/admin.html`.
+diretamente: `https://kidstube.oliversys.tech/admin.html`.
 
 1. Define o **PIN** parental na primeira vez.
 2. Define a **chave da YouTube Data API v3** na variável de ambiente `KIDTUBE_API_KEY`
@@ -87,8 +90,9 @@ scp deploy/kidstube.env.example gomide-vps:/etc/kidstube/kidstube.env
 ssh gomide-vps 'chmod 600 /etc/kidstube/kidstube.env'
 ```
 
-Preencher `GOOGLE_CLIENT_ID` e `GOOGLE_CLIENT_SECRET` (os mesmos que eram secrets do Worker).
-Sem eles, tudo funciona menos as inscrições: a página "Inscrições" mostra só o canal fixo.
+Preencher `KIDTUBE_API_KEY`, `GOOGLE_CLIENT_ID` e `GOOGLE_CLIENT_SECRET`. Sem a primeira a app
+fica em modo demonstração; sem as outras duas, tudo funciona menos as inscrições (a página
+"Inscrições" mostra só o canal fixo).
 
 Variáveis:
 
@@ -138,10 +142,6 @@ Em `https://kidstube.oliversys.tech/admin.html`:
 3. **Definições** → **Ligar conta** para autorizar o `alves.bill@gmail.com` e trazer as
    inscrições. O `redirect_uri` `https://kidstube.oliversys.tech/api/oauth/callback` tem de
    estar registado na consola do Google Cloud, senão o Google recusa.
-4. Importar os bloqueios que estavam na variante do GitHub Pages:
-   ```sh
-   ssh gomide-vps 'docker exec kidstube node scripts/import-blocklist.js'
-   ```
 
 Não é preciso configurar resolvedor nenhum: servida deste servidor, a app descobre-o sozinha
 pelo `/api/status`. A secção "Reprodução sem anúncios" da administração só faz falta quando a
@@ -186,38 +186,8 @@ A app tenta o resolvedor e, se ele falhar (servidor desligado, túnel em baixo, 
 por uma mudança do YouTube), volta sozinha ao player embutido. Nunca fica sem vídeo: fica com
 anúncios, que é o comportamento antigo. O motivo aparece na consola do browser.
 
-## Variante estática (GitHub Pages)
-
-O deploy é feito pelo workflow `.github/workflows/deploy-pages.yml` a cada push no `main`:
-monta o site com `node scripts/build-static.mjs` e injeta a chave fixa a partir do secret
-`YOUTUBE_API_KEY` do repositório (`gh secret set YOUTUBE_API_KEY`) — os dispositivos não
-precisam de colar chave nenhuma; uma chave colada na administração sobrepõe-se à fixa.
-O `docs/` é gerado no CI (está no .gitignore); a versão estática: o `static-api.js`
-implementa a API no próprio browser (YouTube API direta, PIN em `localStorage`). Serve para
-publicar em https://oliverbill.github.io/kidstube/ — mas o filtro passa a correr **no
-cliente**: num iPad de criança é eficaz na prática, mas quem tiver acesso técnico ao browser
-consegue inspecioná-lo. A versão com servidor continua a ser a mais blindada. A chave API é
-introduzida na administração e fica só no `localStorage` do dispositivo (nunca é publicada);
-restringe-a por referrer HTTP no Google Cloud Console.
-
-### Bloqueio centralizado (todos os dispositivos)
-
-Ao contrário do servidor Node (bloqueio local, por máquina), a variante estática guarda os
-bloqueios em **`blocklist.json`** na raiz do repositório — público, lido por todos os iPads
-via `raw.githubusercontent.com`. Um bloqueio feito num dispositivo aplica-se a todos os outros
-com a app instalada, ao fim de alguns minutos (cache de 5 min + cache do CDN do GitHub).
-
-A **gravação** (não é preciso para ler/navegar) passa por um Cloudflare Worker central
-(`worker/`), que guarda o token do GitHub como *secret* do lado do servidor — nenhum dispositivo
-precisa de colar um token pessoal. O PIN de administração também deixou de ser por dispositivo:
-vive no KV do Worker, partilhado por todos os aparelhos. Ver `worker/README` (deploy com
-`worker/deploy.sh`, corrido manualmente por quem administra) para pôr o Worker no ar.
-
-Cada bloqueio/desbloqueio feito no painel passa a ser um commit no repositório (mensagem tipo
-"Bloquear canal: X"), visível no histórico do GitHub.
-
 ## Limitações honestas
 
 - O ecrã final do player embutido ainda mostra vídeos do mesmo canal (comportamento do YouTube,
   não filtrável). Bloquear o canal inteiro resolve.
-- As listas guardam-se em `data/config.json` neste Mac; faz backup se quiseres.
+- As listas guardam-se em `data/config.json` (volume `kidstube-data` no VPS); faz backup se quiseres.

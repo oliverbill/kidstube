@@ -140,7 +140,6 @@
           <p id="apikey-status" class="hint"></p>
         </div>
 
-        <!-- Só existe na variante estática (GitHub Pages); ligado ao Worker (ver worker/). -->
         <div class="settings-block" id="youtube-account-block">
           <h3>Conta do YouTube</h3>
           <p class="hint">
@@ -151,29 +150,6 @@
           </p>
           <p id="youtube-account-status" class="hint"></p>
           <a id="youtube-account-connect" class="btn btn-primary" href="#">Ligar conta</a>
-        </div>
-
-        <!-- Guardado só no localStorage deste aparelho (ver resolverConfig em app.js). -->
-        <div class="settings-block" id="resolver-block">
-          <h3>Reprodução sem anúncios</h3>
-          <p class="hint">
-            Endereço do resolvedor (o servidor com yt-dlp — ver README). Com ele
-            configurado, os vídeos tocam num player próprio, sem anúncios. Sem ele, ou
-            se estiver desligado, a app volta ao player embutido do YouTube.
-          </p>
-          <form id="resolver-form" class="add-form add-form-column" autocomplete="off">
-            <input id="resolver-base" type="url" autocomplete="off"
-                   placeholder="https://resolver.exemplo.com">
-            <input id="resolver-token" type="password" autocomplete="off"
-                   placeholder="Token (deixar vazio se o servidor não pedir)">
-            <div class="add-form">
-              <button type="submit" class="btn btn-primary">Guardar</button>
-              <button type="button" id="resolver-test" class="btn">Testar ligação</button>
-              <button type="button" id="resolver-clear" class="btn">Desligar</button>
-            </div>
-          </form>
-          <p id="resolver-status" class="hint"></p>
-          <p id="resolver-error" class="error" hidden></p>
         </div>
 
         <div class="settings-block">

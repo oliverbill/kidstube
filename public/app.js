@@ -544,30 +544,13 @@ function destroyPlayer() {
 // Resolvedor de streams — reprodução sem anúncios
 //
 // O player embutido nunca é ad-free no iPad: o Safari bloqueia cookies de terceiros,
-// por isso o iframe é sempre uma sessão anónima, mesmo com Premium na conta. Quando
-// há um resolvedor configurado (server/resolve.js, ver README), pedimos-lhe o URL do
-// stream e tocamo-lo num <video> nosso — sem anúncios e sem YouTube no meio. Sem
-// resolvedor, ou se ele falhar, fica o iframe de sempre.
+// por isso o iframe é sempre uma sessão anónima, mesmo com Premium na conta. Este
+// servidor resolve o stream (server/resolve.js) e tocamo-lo num <video> nosso — sem
+// anúncios e sem YouTube no meio. Se o resolvedor falhar, fica o iframe de sempre.
+//
+// O resolvedor é sempre a própria origem: a app é servida pelo mesmo servidor que
+// resolve. O /api/status diz se este servidor o faz.
 // ---------------------------------------------------------------------------
-
-const RESOLVER_KEY = 'kidtube-resolver';
-
-function resolverConfig() {
-  try {
-    const raw = JSON.parse(localStorage.getItem(RESOLVER_KEY));
-    const base = String(raw?.base || '').trim().replace(/\/+$/, '');
-    if (!/^https?:\/\//.test(base)) return null;
-    return { base, token: String(raw?.token || '') };
-  } catch {
-    return null;
-  }
-}
-
-function resolverUrl(resolver, path) {
-  const u = new URL(resolver.base + path);
-  if (resolver.token) u.searchParams.set('t', resolver.token);
-  return u.href;
-}
 
 // Resolve quando os metadados chegam — é o primeiro momento em que se sabe que a
 // fonte é mesmo reproduzível; um URL preso a outro IP só falha aqui.
@@ -635,8 +618,8 @@ function wireNativeControls(video, ctx) {
   });
 }
 
-async function attachNative(resolver, videoId, ctx) {
-  const res = await fetch(resolverUrl(resolver, `/api/stream/${videoId}`), { mode: 'cors' });
+async function attachNative(videoId, ctx) {
+  const res = await fetch(`/api/stream/${videoId}`);
   if (!res.ok) throw new Error(`resolvedor devolveu ${res.status}`);
   const info = await res.json();
   if (!ctx.mount.isConnected) return; // já navegámos para outra página
@@ -655,8 +638,8 @@ async function attachNative(resolver, videoId, ctx) {
   // O HLS encaminhado vem antes do progressivo encaminhado por ser 1080p contra 360p.
   const sources = [info.url];
   if (info.fallback?.url) sources.push(info.fallback.url);
-  if (info.kind === 'hls') sources.push(resolverUrl(resolver, `/api/hls/${videoId}/master.m3u8`));
-  sources.push(resolverUrl(resolver, `/api/stream/${videoId}/proxy`));
+  if (info.kind === 'hls') sources.push(`/api/hls/${videoId}/master.m3u8`);
+  sources.push(`/api/stream/${videoId}/proxy`);
 
   let lastErr = null;
   let loaded = false;
@@ -719,17 +702,10 @@ function buildPlayer(videoId) {
 
   const ctx = { player, frame, mount, shield, bigPlay, playBtn, seek, clock, fsBtn };
 
-  // Um resolvedor colado à mão manda; senão, se for o próprio servidor a servir a
-  // app e ele resolver streams, usa-se esse — sem configuração nenhuma.
-  const manual = resolverConfig();
-  const chosen = manual
-    ? Promise.resolve(manual)
-    : getStatus().then((s) => (s.resolver ? { base: location.origin, token: '' } : null));
-
-  chosen.then((resolver) => {
+  getStatus().then((status) => {
     if (!ctx.mount.isConnected) return; // já navegámos para outra página
-    if (!resolver) return attachEmbed(videoId, ctx);
-    attachNative(resolver, videoId, ctx).catch((err) => {
+    if (!status.resolver) return attachEmbed(videoId, ctx);
+    attachNative(videoId, ctx).catch((err) => {
       console.warn('resolvedor falhou (%s) — a usar o player embutido', err.message);
       if (ctx.mount.isConnected) attachEmbed(videoId, ctx);
     });

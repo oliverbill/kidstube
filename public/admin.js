@@ -5,54 +5,9 @@ const $ = (sel) => document.querySelector(sel);
 
 const PIN_KEY = 'kidtube-pin';
 
-// Definido por static-api.js (só existe na variante GitHub Pages). Nessa variante
-// o bloqueio não é local: vive em blocklist.json no GitHub, partilhado por todos
-// os dispositivos com a app instalada. No servidor Node continua tudo local.
-const IS_STATIC = typeof window.__KIDTUBE_STATIC__ !== 'undefined';
-
 const state = {
   config: null, // { apiKeySet, blocked: {channels, keywords, videos}, safeSearch }
 };
-
-// ---------------------------------------------------------------------------
-// Bloqueio centralizado no GitHub (só na variante estática)
-// ---------------------------------------------------------------------------
-
-const GH_OWNER = 'oliverbill';
-const GH_REPO = 'kidstube';
-const GH_PATH = 'blocklist.json';
-const GH_BRANCH = 'main';
-
-// Worker central (worker/) — guarda o PIN partilhado e o token do GitHub como
-// secret; a gravação em blocklist.json passa sempre por aqui, nunca direto do
-// browser. Ver worker/src/index.js.
-const WORKER_BASE = 'https://kidstube-admin.alves-bill.workers.dev';
-
-// Leitura é sempre pública (repo público) — não precisa de token nem do Worker.
-async function ghReadBlocklist() {
-  const res = await fetch(
-    `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${GH_PATH}?ref=${GH_BRANCH}`,
-    { headers: { Accept: 'application/vnd.github+json' }, cache: 'no-store' },
-  );
-  if (!res.ok) throw new Error(`Não consegui ler o blocklist.json do GitHub (${res.status}).`);
-  const data = await res.json();
-  const decoded = decodeURIComponent(escape(atob(data.content.replace(/\n/g, ''))));
-  const parsed = JSON.parse(decoded);
-  return {
-    blocked: {
-      channels: Array.isArray(parsed.channels) ? parsed.channels : [],
-      keywords: Array.isArray(parsed.keywords) ? parsed.keywords : [],
-      videos: Array.isArray(parsed.videos) ? parsed.videos : [],
-    },
-  };
-}
-
-// Grava uma mutação via Worker (que lê o ficheiro mais recente, aplica e
-// grava com o seu próprio token — evita conflitos de sha do lado dele).
-async function workerMutateBlocklist(op, payload, message) {
-  const res = await workerFetch('/blocklist/mutate', { op, payload, message });
-  return res.blocked;
-}
 
 // ---------------------------------------------------------------------------
 // Pedidos à API
@@ -103,31 +58,12 @@ async function api(method, path, body, opts = {}) {
   return handleApiResponse(resp, opts);
 }
 
-// Fala com o Worker central (worker/) em vez do fetch interceptado localmente
-// — usado só nos pontos de admin.js que precisam de PIN/gravação partilhados
-// (ver WORKER_BASE acima).
-async function workerFetch(path, body, opts = {}) {
-  const headers = { 'Content-Type': 'application/json' };
-  if (!opts.noPin) headers['X-Pin'] = getPin();
-  const resp = await fetch(WORKER_BASE + path, {
-    method: opts.method || 'POST',
-    headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  return handleApiResponse(resp, opts);
-}
-
-// PIN é sempre partilhado via Worker na variante estática (ver WORKER_BASE).
 function verifyPinCall(opts) {
-  return IS_STATIC
-    ? workerFetch('/verify', {}, opts)
-    : api('POST', '/api/admin/verify', {}, opts);
+  return api('POST', '/api/admin/verify', {}, opts);
 }
 
 function setPinCall(pin, opts) {
-  return IS_STATIC
-    ? workerFetch('/pin', { pin }, opts)
-    : api('POST', '/api/admin/pin', { pin }, opts);
+  return api('POST', '/api/admin/pin', { pin }, opts);
 }
 
 class ApiError extends Error {
@@ -247,11 +183,9 @@ function showPinScreen(subtitle, setupMode = false) {
 // Reposição do PIN por email
 // ---------------------------------------------------------------------------
 
-// Na variante estática o PIN vive no Worker, que não envia email: lá o botão não
-// aparece de todo.
 async function offerPinReset() {
   const btn = $('#pin-forgot');
-  if (!btn || IS_STATIC) return;
+  if (!btn) return;
   try {
     const { available, hint } = await api('GET', '/api/admin/pin/reset', undefined, { noPin: true });
     btn.hidden = !available;
@@ -292,7 +226,7 @@ function pendingResetToken() {
 // isso não recarrega a página — sem isto, o link parecia não fazer nada.
 window.addEventListener('hashchange', () => {
   const token = pendingResetToken();
-  if (token && !IS_STATIC) showPinResetScreen(token);
+  if (token) showPinResetScreen(token);
 });
 
 function showPinResetScreen(token) {
@@ -359,18 +293,14 @@ async function boot() {
   // Um link de reposição manda em tudo o resto: quem o abriu não sabe o PIN, e não
   // vale a pena mostrar-lhe primeiro o ecrã a pedi-lo.
   const resetToken = pendingResetToken();
-  if (resetToken && !IS_STATIC) {
+  if (resetToken) {
     showPinResetScreen(resetToken);
     return;
   }
 
-  // O bloco da conta do YouTube existe nas duas variantes: na estática fala com o
-  // Worker, servida do servidor fala com o próprio servidor.
   let status;
   try {
-    status = IS_STATIC
-      ? await workerFetch('/status', undefined, { method: 'GET', noPin: true })
-      : await api('GET', '/api/status', undefined, { noPin: true });
+    status = await api('GET', '/api/status', undefined, { noPin: true });
   } catch (err) {
     showPinScreen(`Não foi possível contactar o servidor (${err.message}).`);
     return;
@@ -451,12 +381,7 @@ document.querySelectorAll('.tab').forEach((btn) => {
 // ---------------------------------------------------------------------------
 
 async function refreshConfig() {
-  if (IS_STATIC) {
-    const { blocked } = await ghReadBlocklist();
-    state.config = { blocked };
-  } else {
-    state.config = await api('GET', '/api/admin/config');
-  }
+  state.config = await api('GET', '/api/admin/config');
   renderLists();
   renderSettings();
   await renderYoutubeAccountStatus();
@@ -466,11 +391,9 @@ async function renderYoutubeAccountStatus() {
   const el = $('#youtube-account-status');
   const link = $('#youtube-account-connect');
   if (!el || !link) return;
-  link.href = IS_STATIC ? `${WORKER_BASE}/oauth/start` : '/api/oauth/start';
+  link.href = '/api/oauth/start';
   try {
-    const { connected, configured } = IS_STATIC
-      ? await workerFetch('/oauth/status', undefined, { method: 'GET', noPin: true })
-      : await api('GET', '/api/oauth/status', undefined, { noPin: true });
+    const { connected, configured } = await api('GET', '/api/oauth/status', undefined, { noPin: true });
     if (configured === false) {
       el.textContent = 'O servidor não tem GOOGLE_CLIENT_ID/SECRET configurados — ver o README.';
       link.hidden = true;
@@ -483,14 +406,6 @@ async function renderYoutubeAccountStatus() {
   } catch (err) {
     el.textContent = `Não foi possível verificar o estado (${err.message}).`;
   }
-}
-
-// Aplica diretamente o `blocked` devolvido pelo Worker após uma mutação — relê-lo
-// do GitHub logo a seguir (refreshConfig) bate por vezes numa réplica que ainda não
-// viu o commit e faz o item recém-bloqueado "desaparecer" da tela.
-function applyBlocked(blocked) {
-  state.config = { ...state.config, blocked };
-  renderLists();
 }
 
 function renderList(listSel, emptySel, items, renderItem, onRemove) {
@@ -510,9 +425,8 @@ function renderList(listSel, emptySel, items, renderItem, onRemove) {
     btn.addEventListener('click', async () => {
       btn.disabled = true;
       try {
-        const blocked = await onRemove(item);
-        if (IS_STATIC) applyBlocked(blocked);
-        else await refreshConfig();
+        await onRemove(item);
+        await refreshConfig();
       } catch (err) {
         btn.disabled = false;
         flash(err.message, true);
@@ -533,18 +447,14 @@ function renderLists() {
     id.className = 'item-id';
     id.textContent = ch.id;
     el.append(t, id);
-  }, (ch) => IS_STATIC
-    ? workerMutateBlocklist('unblock-channel', { id: ch.id }, `Desbloquear canal: ${ch.title || ch.id}`)
-    : api('DELETE', `/api/admin/block/channel/${encodeURIComponent(ch.id)}`));
+  }, (ch) => api('DELETE', `/api/admin/block/channel/${encodeURIComponent(ch.id)}`));
 
   renderList('#keyword-list', '#keyword-empty', b.keywords || [], (el, kw) => {
     const t = document.createElement('span');
     t.className = 'item-title';
     t.textContent = kw;
     el.append(t);
-  }, (kw) => IS_STATIC
-    ? workerMutateBlocklist('unblock-keyword', { keyword: kw }, `Desbloquear tema: ${kw}`)
-    : api('DELETE', `/api/admin/block/keyword/${encodeURIComponent(kw)}`));
+  }, (kw) => api('DELETE', `/api/admin/block/keyword/${encodeURIComponent(kw)}`));
 
   renderList('#video-list', '#video-empty', b.videos || [], (el, v) => {
     const t = document.createElement('span');
@@ -554,9 +464,7 @@ function renderLists() {
     id.className = 'item-id';
     id.textContent = v.id;
     el.append(t, id);
-  }, (v) => IS_STATIC
-    ? workerMutateBlocklist('unblock-video', { id: v.id }, `Desbloquear vídeo: ${v.title || v.id}`)
-    : api('DELETE', `/api/admin/block/video/${encodeURIComponent(v.id)}`));
+  }, (v) => api('DELETE', `/api/admin/block/video/${encodeURIComponent(v.id)}`));
 }
 
 function renderSettings() {
@@ -594,13 +502,8 @@ function hideSuggest() {
 }
 
 async function blockChannelEntry(id, title) {
-  if (IS_STATIC) {
-    const blocked = await workerMutateBlocklist('block-channel', { id, title }, `Bloquear canal: ${title || id}`);
-    applyBlocked(blocked);
-  } else {
-    await api('POST', '/api/admin/block/channel', { id, title });
-    await refreshConfig();
-  }
+  await api('POST', '/api/admin/block/channel', { id, title });
+  await refreshConfig();
   $('#channel-form').reset();
   hideSuggest();
   flash(title ? `Canal "${title}" bloqueado.` : 'Canal bloqueado.');
@@ -695,13 +598,8 @@ $('#keyword-form').addEventListener('submit', async (ev) => {
   const keyword = $('#keyword-input').value.trim();
   if (!keyword) return;
   try {
-    if (IS_STATIC) {
-      const blocked = await workerMutateBlocklist('block-keyword', { keyword }, `Bloquear tema: ${keyword}`);
-      applyBlocked(blocked);
-    } else {
-      await api('POST', '/api/admin/block/keyword', { keyword });
-      await refreshConfig();
-    }
+    await api('POST', '/api/admin/block/keyword', { keyword });
+    await refreshConfig();
     $('#keyword-form').reset();
     flash('Tema bloqueado.');
   } catch (err) {
@@ -716,13 +614,8 @@ $('#video-form').addEventListener('submit', async (ev) => {
   try {
     const id = extractVideoId($('#video-input').value);
     const title = $('#video-title').value.trim();
-    if (IS_STATIC) {
-      const blocked = await workerMutateBlocklist('block-video', { id, title }, `Bloquear vídeo: ${title || id}`);
-      applyBlocked(blocked);
-    } else {
-      await api('POST', '/api/admin/block/video', { id, title });
-      await refreshConfig();
-    }
+    await api('POST', '/api/admin/block/video', { id, title });
+    await refreshConfig();
     $('#video-form').reset();
     flash('Vídeo bloqueado.');
   } catch (err) {
@@ -734,86 +627,6 @@ $('#video-form').addEventListener('submit', async (ev) => {
 // ---------------------------------------------------------------------------
 // Definições
 // ---------------------------------------------------------------------------
-
-// Resolvedor de streams (reprodução sem anúncios). Fica no localStorage deste
-// aparelho — não passa pelo servidor nem pela blocklist partilhada.
-const RESOLVER_KEY = 'kidtube-resolver';
-
-function readResolver() {
-  try {
-    const raw = JSON.parse(localStorage.getItem(RESOLVER_KEY));
-    return { base: String(raw?.base || ''), token: String(raw?.token || '') };
-  } catch {
-    return { base: '', token: '' };
-  }
-}
-
-function renderResolver() {
-  const status = $('#resolver-status');
-  if (!status) return;
-  const { base, token } = readResolver();
-  $('#resolver-base').value = base;
-  $('#resolver-token').value = token;
-  status.textContent = base
-    ? `Ligado a ${base} — os vídeos tocam sem anúncios enquanto este servidor responder.`
-    : 'Desligado — os vídeos tocam no player embutido do YouTube, com anúncios.';
-}
-
-async function pingResolver({ base, token }) {
-  const u = new URL(base.replace(/\/+$/, '') + '/api/ping');
-  if (token) u.searchParams.set('t', token);
-  const res = await fetch(u.href, { mode: 'cors' });
-  if (!res.ok) {
-    throw new Error(res.status === 401
-      ? 'O servidor respondeu 401 — o token não bate certo.'
-      : `O servidor respondeu ${res.status}.`);
-  }
-  const body = await res.json();
-  if (!body.ok) throw new Error(body.error || 'Resposta inesperada do resolvedor.');
-  return body;
-}
-
-function resolverFromForm() {
-  const base = $('#resolver-base').value.trim().replace(/\/+$/, '');
-  const token = $('#resolver-token').value.trim();
-  if (!/^https?:\/\//.test(base)) {
-    throw new Error('O endereço tem de começar por http:// ou https://.');
-  }
-  return { base, token };
-}
-
-$('#resolver-form')?.addEventListener('submit', async (ev) => {
-  ev.preventDefault();
-  showError('#resolver-error', '');
-  try {
-    const cfg = resolverFromForm();
-    await pingResolver(cfg); // não guarda um endereço que nem responde
-    localStorage.setItem(RESOLVER_KEY, JSON.stringify(cfg));
-    renderResolver();
-    flash('Resolvedor guardado — os vídeos passam a tocar sem anúncios.');
-  } catch (err) {
-    showError('#resolver-error', `Não guardei: ${err.message}`);
-  }
-});
-
-$('#resolver-test')?.addEventListener('click', async () => {
-  showError('#resolver-error', '');
-  try {
-    const body = await pingResolver(resolverFromForm());
-    flash(`Resolvedor a responder (yt-dlp ${body.ytdlp || '?'}).`);
-  } catch (err) {
-    showError('#resolver-error', `Sem resposta: ${err.message}`);
-  }
-});
-
-$('#resolver-clear')?.addEventListener('click', () => {
-  showError('#resolver-error', '');
-  localStorage.removeItem(RESOLVER_KEY);
-  renderResolver();
-  flash('Resolvedor desligado.');
-});
-
-renderResolver();
 
 $('#changepin-form').addEventListener('submit', async (ev) => {
   ev.preventDefault();

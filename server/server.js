@@ -173,10 +173,9 @@ function serveMockThumb(res, id) {
 
 // ---------- Resolvedor de streams (reprodução sem anúncios) ----------
 //
-// Estas rotas são as únicas com CORS: são chamadas a partir do site publicado
-// (GitHub Pages), que tem outra origem. Se KIDTUBE_RESOLVER_TOKEN estiver definido,
-// exigem o token — o resolvedor fica exposto em HTTPS pelo túnel e sem token seria
-// um yt-dlp aberto ao mundo.
+// Estas rotas têm CORS e podem exigir um token (KIDTUBE_RESOLVER_TOKEN), para o caso
+// de o resolvedor ser usado por uma app servida de outra origem. Servida daqui, a app
+// é da mesma origem e nada disso é preciso.
 
 const RESOLVER_TOKEN = process.env.KIDTUBE_RESOLVER_TOKEN || '';
 const RESOLVER_ONLY = process.env.KIDTUBE_RESOLVER_ONLY === '1';
@@ -633,8 +632,8 @@ const server = http.createServer(async (req, res) => {
 
   try {
     if (await handleResolver(req, res, url)) return;
-    // No VPS o servidor é só resolvedor: a app vem do GitHub Pages e a administração
-    // não tem nada que estar exposta na Internet.
+    // Modo só-resolvedor: a app é servida de outro sítio e a administração não tem
+    // nada que estar exposta aqui.
     if (RESOLVER_ONLY) return sendError(res, 404, 'Rota não encontrada.');
     if (url.pathname.startsWith('/api/')) {
       await handleApi(req, res, url);

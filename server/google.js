@@ -2,9 +2,7 @@
 
 // google.js — OAuth com a conta do YouTube e a lista de inscrições.
 //
-// Porta para o servidor o que vivia no Worker (worker/src/index.js). Na variante
-// do GitHub Pages o Worker era necessário porque não havia servidor nenhum onde
-// guardar um refresh_token; servida a app do VPS, o servidor é o sítio natural.
+// Guardar um refresh_token exige um servidor — é aqui que ele vive.
 //
 // O refresh_token fica num ficheiro só de leitura para o dono do processo — é ele
 // que dá acesso de leitura à conta do YouTube, e nunca chega ao browser.
