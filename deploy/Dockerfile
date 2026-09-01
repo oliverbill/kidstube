@@ -28,8 +28,6 @@ RUN apt-get update \
 WORKDIR /app
 COPY server ./server
 COPY public ./public
-COPY scripts ./scripts
-COPY blocklist.json ./blocklist.json
 
 # data/ (config, PIN, bloqueios) e o estado do OAuth vivem em volumes — a imagem
 # é descartável, o estado não.
