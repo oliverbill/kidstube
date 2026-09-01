@@ -1,0 +1,37 @@
+# KidTube no VPS. Segue o padrão que já lá está (gomide): container em loopback,
+# exposto ao mundo só pelo Cloudflare Tunnel que já corre na máquina.
+#
+#   cd /opt/kidstube && docker compose -f deploy/docker-compose.yml up -d --build
+#
+# A porta é 127.0.0.1:8478 — nada de abrir portas no firewall.
+
+services:
+  kidstube:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: kidstube:local
+    container_name: kidstube
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8478:8478"
+    env_file:
+      - /etc/kidstube/kidstube.env
+    volumes:
+      # Configuração, PIN e bloqueios — o que não pode morrer com a imagem.
+      - kidstube-data:/app/data
+      # Estado do OAuth do Google (refresh_token). Ficheiro separado por ser o
+      # mais sensível: dá acesso de leitura à conta do YouTube.
+      - kidstube-secrets:/app/secrets
+      # Cookies da sessão do YouTube, só de leitura para o container.
+      - /etc/kidstube/cookies.txt:/app/secrets/cookies.txt:ro
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8478/api/status').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  kidstube-data:
+  kidstube-secrets:

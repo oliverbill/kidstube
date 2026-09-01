@@ -265,7 +265,8 @@ async function boot() {
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js').catch(() => { /* PWA opcional */ });
   }
-  if (!IS_STATIC) $('#youtube-account-block')?.remove();
+  // O bloco da conta do YouTube existe nas duas variantes: na estática fala com o
+  // Worker, servida do servidor fala com o próprio servidor.
   let status;
   try {
     status = IS_STATIC
@@ -359,16 +360,24 @@ async function refreshConfig() {
   }
   renderLists();
   renderSettings();
-  if (IS_STATIC) await renderYoutubeAccountStatus();
+  await renderYoutubeAccountStatus();
 }
 
 async function renderYoutubeAccountStatus() {
   const el = $('#youtube-account-status');
   const link = $('#youtube-account-connect');
   if (!el || !link) return;
-  link.href = `${WORKER_BASE}/oauth/start`;
+  link.href = IS_STATIC ? `${WORKER_BASE}/oauth/start` : '/api/oauth/start';
   try {
-    const { connected } = await workerFetch('/oauth/status', undefined, { method: 'GET', noPin: true });
+    const { connected, configured } = IS_STATIC
+      ? await workerFetch('/oauth/status', undefined, { method: 'GET', noPin: true })
+      : await api('GET', '/api/oauth/status', undefined, { noPin: true });
+    if (configured === false) {
+      el.textContent = 'O servidor não tem GOOGLE_CLIENT_ID/SECRET configurados — ver o README.';
+      link.hidden = true;
+      return;
+    }
+    link.hidden = false;
     el.textContent = connected
       ? 'Conta ligada ✓ — liga outra para a substituir.'
       : 'Nenhuma conta ligada — a home e as inscrições ficam vazias até ligares uma.';
@@ -644,6 +653,86 @@ $('#apikey-form')?.addEventListener('submit', async (ev) => {
     showError('#apikey-error', err.message);
   }
 });
+
+// Resolvedor de streams (reprodução sem anúncios). Fica no localStorage deste
+// aparelho — não passa pelo servidor nem pela blocklist partilhada.
+const RESOLVER_KEY = 'kidtube-resolver';
+
+function readResolver() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(RESOLVER_KEY));
+    return { base: String(raw?.base || ''), token: String(raw?.token || '') };
+  } catch {
+    return { base: '', token: '' };
+  }
+}
+
+function renderResolver() {
+  const status = $('#resolver-status');
+  if (!status) return;
+  const { base, token } = readResolver();
+  $('#resolver-base').value = base;
+  $('#resolver-token').value = token;
+  status.textContent = base
+    ? `Ligado a ${base} — os vídeos tocam sem anúncios enquanto este servidor responder.`
+    : 'Desligado — os vídeos tocam no player embutido do YouTube, com anúncios.';
+}
+
+async function pingResolver({ base, token }) {
+  const u = new URL(base.replace(/\/+$/, '') + '/api/ping');
+  if (token) u.searchParams.set('t', token);
+  const res = await fetch(u.href, { mode: 'cors' });
+  if (!res.ok) {
+    throw new Error(res.status === 401
+      ? 'O servidor respondeu 401 — o token não bate certo.'
+      : `O servidor respondeu ${res.status}.`);
+  }
+  const body = await res.json();
+  if (!body.ok) throw new Error(body.error || 'Resposta inesperada do resolvedor.');
+  return body;
+}
+
+function resolverFromForm() {
+  const base = $('#resolver-base').value.trim().replace(/\/+$/, '');
+  const token = $('#resolver-token').value.trim();
+  if (!/^https?:\/\//.test(base)) {
+    throw new Error('O endereço tem de começar por http:// ou https://.');
+  }
+  return { base, token };
+}
+
+$('#resolver-form')?.addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  showError('#resolver-error', '');
+  try {
+    const cfg = resolverFromForm();
+    await pingResolver(cfg); // não guarda um endereço que nem responde
+    localStorage.setItem(RESOLVER_KEY, JSON.stringify(cfg));
+    renderResolver();
+    flash('Resolvedor guardado — os vídeos passam a tocar sem anúncios.');
+  } catch (err) {
+    showError('#resolver-error', `Não guardei: ${err.message}`);
+  }
+});
+
+$('#resolver-test')?.addEventListener('click', async () => {
+  showError('#resolver-error', '');
+  try {
+    const body = await pingResolver(resolverFromForm());
+    flash(`Resolvedor a responder (yt-dlp ${body.ytdlp || '?'}).`);
+  } catch (err) {
+    showError('#resolver-error', `Sem resposta: ${err.message}`);
+  }
+});
+
+$('#resolver-clear')?.addEventListener('click', () => {
+  showError('#resolver-error', '');
+  localStorage.removeItem(RESOLVER_KEY);
+  renderResolver();
+  flash('Resolvedor desligado.');
+});
+
+renderResolver();
 
 $('#changepin-form').addEventListener('submit', async (ev) => {
   ev.preventDefault();

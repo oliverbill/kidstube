@@ -1,0 +1,37 @@
+# Resolvedor de streams do KidTube — unidade systemd para o VPS.
+#
+#   sudo cp deploy/kidstube-resolver.service /etc/systemd/system/
+#   sudo cp deploy/resolver.env.example /etc/kidstube/resolver.env   # e editar
+#   sudo systemctl enable --now kidstube-resolver
+#
+# Ver o que está a fazer:  journalctl -u kidstube-resolver -f
+
+[Unit]
+Description=KidTube — resolvedor de streams (yt-dlp)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kidstube
+Group=kidstube
+WorkingDirectory=/opt/kidstube
+EnvironmentFile=/etc/kidstube/resolver.env
+ExecStart=/usr/bin/node server/server.js
+Restart=always
+RestartSec=5
+
+# O resolvedor não escreve nada e corre com cookies de uma conta real lá dentro —
+# quanto menos alcançar do sistema, menos custa um dia mau.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/opt/kidstube /etc/kidstube
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

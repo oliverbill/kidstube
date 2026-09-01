@@ -9,6 +9,9 @@ const path = require('node:path');
 
 const store = require('./store');
 const yt = require('./youtube');
+const resolve = require('./resolve');
+const hls = require('./hls');
+const google = require('./google');
 const mockdata = require('./mockdata');
 
 const PORT = Number(process.env.PORT) || 8478;
@@ -167,6 +170,223 @@ function serveMockThumb(res, id) {
   res.end(svg);
 }
 
+// ---------- Resolvedor de streams (reprodução sem anúncios) ----------
+//
+// Estas rotas são as únicas com CORS: são chamadas a partir do site publicado
+// (GitHub Pages), que tem outra origem. Se KIDTUBE_RESOLVER_TOKEN estiver definido,
+// exigem o token — o resolvedor fica exposto em HTTPS pelo túnel e sem token seria
+// um yt-dlp aberto ao mundo.
+
+const RESOLVER_TOKEN = process.env.KIDTUBE_RESOLVER_TOKEN || '';
+const RESOLVER_ONLY = process.env.KIDTUBE_RESOLVER_ONLY === '1';
+
+// O Google exige que o redirect_uri seja exactamente o registado na consola. Atrás
+// do Caddy o pedido chega em http, daí o X-Forwarded-Proto.
+function oauthRedirectUri(req) {
+  if (process.env.KIDTUBE_PUBLIC_URL) {
+    return `${process.env.KIDTUBE_PUBLIC_URL.replace(/\/+$/, '')}/api/oauth/callback`;
+  }
+  const proto = req.headers['x-forwarded-proto'] || 'http';
+  return `${proto}://${req.headers.host}/api/oauth/callback`;
+}
+
+function corsHeaders() {
+  return {
+    'Access-Control-Allow-Origin': process.env.KIDTUBE_ALLOW_ORIGIN || '*',
+    'Access-Control-Allow-Headers': 'X-Resolver-Token, Range',
+    'Access-Control-Expose-Headers': 'Content-Length, Content-Range, Accept-Ranges',
+    'Access-Control-Max-Age': '86400',
+  };
+}
+
+function sendCorsJson(res, status, obj) {
+  const body = JSON.stringify(obj);
+  res.writeHead(status, {
+    ...corsHeaders(),
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store',
+  });
+  res.end(body);
+}
+
+// Servida a app da Internet, as rotas do resolvedor são públicas — um token no
+// browser de toda a gente não é segredo nenhum. O que impede isto de ser um
+// descarregador de YouTube aberto ao mundo é o limite por IP: cada resolução custa
+// um yt-dlp, e um visitante normal vê dezenas de vídeos por dia, não milhares.
+const RATE_MAX = Number(process.env.KIDTUBE_RESOLVE_RATE) || 40;
+const RATE_WINDOW_MS = 10 * 60_000;
+const rateHits = new Map();
+
+function clientIp(req) {
+  if (process.env.KIDTUBE_TRUST_PROXY === '1') {
+    const fwd = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+    if (fwd) return fwd;
+  }
+  return req.socket.remoteAddress || 'desconhecido';
+}
+
+function rateLimited(req) {
+  const now = Date.now();
+  const ip = clientIp(req);
+  const hits = (rateHits.get(ip) || []).filter((t) => now - t < RATE_WINDOW_MS);
+  hits.push(now);
+  rateHits.set(ip, hits);
+  if (rateHits.size > 5000) rateHits.clear(); // rede: não crescer sem limite
+  return hits.length > RATE_MAX;
+}
+
+function tokenOk(req, url) {
+  if (!RESOLVER_TOKEN) return true;
+  const given = req.headers['x-resolver-token'] || url.searchParams.get('t') || '';
+  return String(given) === RESOLVER_TOKEN;
+}
+
+// Encaminha os bytes do googlevideo através daqui. Só é usado quando o iPad não
+// consegue ler o URL directo — acontece quando o YouTube prende o URL ao IP de quem
+// o resolveu. Preserva o Range, senão não há como saltar no vídeo.
+async function proxyStream(req, res, info) {
+  const headers = {};
+  if (req.headers.range) headers.Range = req.headers.range;
+
+  const upstream = await fetch(info.url, { headers, redirect: 'follow' });
+  const out = { ...corsHeaders(), 'Cache-Control': 'no-store' };
+  for (const h of ['content-type', 'content-length', 'content-range', 'accept-ranges']) {
+    const v = upstream.headers.get(h);
+    if (v) out[h] = v;
+  }
+  if (!out['content-type']) out['content-type'] = info.mime;
+  res.writeHead(upstream.status, out);
+
+  if (req.method === 'HEAD' || !upstream.body) return res.end();
+  const { Readable } = require('node:stream');
+  const body = Readable.fromWeb(upstream.body);
+  req.on('close', () => body.destroy());
+  body.pipe(res);
+}
+
+// Encaminha uma playlist HLS, reescrevendo cada URI lá dentro para voltar aqui.
+async function proxyPlaylist(res, target, token) {
+  const upstream = await fetch(target, { redirect: 'follow' });
+  if (!upstream.ok) {
+    sendCorsJson(res, upstream.status, { error: `O YouTube respondeu ${upstream.status}.` });
+    return;
+  }
+  // O URL final (depois de redirecionamentos) é a base certa para os URIs relativos.
+  const base = upstream.url || target;
+  const text = await upstream.text();
+
+  const suffix = token ? `&t=${encodeURIComponent(token)}` : '';
+  const body = hls.rewritePlaylist(text, base, (abs, isPlaylist) =>
+    `/api/hls/${isPlaylist ? 'playlist.m3u8' : 'segment'}?u=${hls.encodeTarget(abs)}${suffix}`);
+
+  res.writeHead(200, {
+    ...corsHeaders(),
+    'Content-Type': 'application/vnd.apple.mpegurl',
+    'Cache-Control': 'no-store',
+  });
+  res.end(body);
+}
+
+// Devolve true se tratou o pedido.
+async function handleResolver(req, res, url) {
+  const p = url.pathname;
+  const isPing = p === '/api/ping';
+  const stream = p.match(/^\/api\/stream\/([^/]+)(\/proxy)?$/);
+  const hlsMaster = p.match(/^\/api\/hls\/([^/]+)\/master\.m3u8$/);
+  const hlsPlaylist = p === '/api/hls/playlist.m3u8';
+  const hlsSegment = p === '/api/hls/segment';
+  if (!isPing && !stream && !hlsMaster && !hlsPlaylist && !hlsSegment) return false;
+
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, corsHeaders());
+    res.end();
+    return true;
+  }
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    sendCorsJson(res, 405, { error: 'Método não permitido.' });
+    return true;
+  }
+  if (!tokenOk(req, url)) {
+    sendCorsJson(res, 401, { error: 'Token do resolvedor inválido.' });
+    return true;
+  }
+
+  try {
+    if (isPing) {
+      sendCorsJson(res, 200, { ok: true, ytdlp: await resolve.version() });
+      return true;
+    }
+
+    if (hlsPlaylist) {
+      await proxyPlaylist(res, hls.decodeTarget(url.searchParams.get('u')), RESOLVER_TOKEN);
+      return true;
+    }
+
+    if (hlsSegment) {
+      const target = hls.decodeTarget(url.searchParams.get('u'));
+      await proxyStream(req, res, { url: target, mime: 'video/mp4' });
+      return true;
+    }
+
+    if (hlsMaster) {
+      const info = await resolve.resolveStream(decodeURIComponent(hlsMaster[1]));
+      if (info.kind !== 'hls') {
+        sendCorsJson(res, 409, { error: 'Este vídeo não tem HLS.' });
+        return true;
+      }
+      await proxyPlaylist(res, info.url, RESOLVER_TOKEN);
+      return true;
+    }
+
+    // Só a resolução conta para o limite: playlists e segmentos são a continuação
+    // de um vídeo já autorizado, e cortá-los a meio seria cortar a reprodução.
+    if (rateLimited(req)) {
+      sendCorsJson(res, 429, { error: 'Demasiados vídeos em pouco tempo. Tenta daqui a pouco.' });
+      return true;
+    }
+
+    const videoId = decodeURIComponent(stream[1]);
+    const wantsProxy = Boolean(stream[2]);
+    // No proxy o cache pode ter um URL que o upstream já rejeita; ?fresh=1 força
+    // uma resolução nova antes de desistir.
+    if (url.searchParams.get('fresh') === '1') resolve.forget(videoId);
+    const info = await resolve.resolveStream(videoId);
+
+    if (wantsProxy) {
+      // Um manifesto HLS não se encaminha por aqui (os segmentos apontariam para o
+      // googlevideo na mesma) — o proxy serve sempre o progressivo.
+      const target = info.kind === 'hls' ? info.fallback : info;
+      if (!target) {
+        sendCorsJson(res, 409, { error: 'Este vídeo não tem formato progressivo.' });
+        return true;
+      }
+      await proxyStream(req, res, target);
+      return true;
+    }
+    sendCorsJson(res, 200, {
+      videoId: info.videoId,
+      url: info.url,
+      kind: info.kind,
+      mime: info.mime,
+      height: info.height,
+      formatId: info.formatId,
+      duration: info.duration,
+      fallback: info.fallback
+        ? { url: info.fallback.url, kind: 'progressive', mime: info.fallback.mime, height: info.fallback.height }
+        : null,
+      expiresAt: info.expiresAt,
+    });
+  } catch (err) {
+    console.error('resolver:', err.message);
+    if (!res.headersSent) {
+      sendCorsJson(res, err.status || 500, { error: err.message || 'Erro no resolvedor.' });
+    } else {
+      res.end();
+    }
+  }
+  return true;
+}
+
 // ---------- Router da API ----------
 
 async function handleApi(req, res, url) {
@@ -181,7 +401,45 @@ async function handleApi(req, res, url) {
       hasApiKey: Boolean(cfg.apiKey),
       hasPin: store.hasPin(),
       mock: yt.usingMock(),
+      // Diz à app que este servidor resolve streams: servida daqui, ela usa o
+      // resolvedor da própria origem e não precisa de configuração nenhuma.
+      resolver: !RESOLVER_ONLY,
     });
+  }
+
+  // -------- Conta do YouTube (OAuth) e inscrições --------
+
+  if (method === 'GET' && p === '/api/oauth/status') {
+    return sendJson(res, 200, {
+      configured: google.configured(),
+      connected: google.connected(),
+    });
+  }
+
+  if (method === 'GET' && p === '/api/oauth/start') {
+    if (!google.configured()) return sendError(res, 503, 'OAuth não configurado no servidor.');
+    res.writeHead(302, { Location: google.authUrl(oauthRedirectUri(req)) });
+    return res.end();
+  }
+
+  if (method === 'GET' && p === '/api/oauth/callback') {
+    try {
+      await google.exchangeCode(
+        url.searchParams.get('code') || '',
+        url.searchParams.get('state') || '',
+        oauthRedirectUri(req));
+      res.writeHead(302, { Location: '/admin.html#oauth=ok' });
+    } catch (err) {
+      console.error('oauth:', err.message);
+      res.writeHead(302, { Location: '/admin.html#oauth=erro' });
+    }
+    return res.end();
+  }
+
+  if (method === 'GET' && p === '/api/subscriptions') {
+    const blockedIds = new Set((store.getConfig().blocked.channels || []).map((c) => c.id));
+    const channels = (await google.subscriptions()).filter((c) => !blockedIds.has(c.id));
+    return sendJson(res, 200, { channels });
   }
 
   if (method === 'GET' && p === '/api/home') {
@@ -312,6 +570,10 @@ const server = http.createServer(async (req, res) => {
   }
 
   try {
+    if (await handleResolver(req, res, url)) return;
+    // No VPS o servidor é só resolvedor: a app vem do GitHub Pages e a administração
+    // não tem nada que estar exposta na Internet.
+    if (RESOLVER_ONLY) return sendError(res, 404, 'Rota não encontrada.');
     if (url.pathname.startsWith('/api/')) {
       await handleApi(req, res, url);
       return;

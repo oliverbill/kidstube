@@ -14,17 +14,19 @@ if ('serviceWorker' in navigator) {
   });
 }
 
-async function checkStatus() {
-  try {
-    const res = await fetch('/api/status');
-    if (!res.ok) return;
-    const status = await res.json();
-    mockBanner.hidden = !status.mock;
-  } catch {
-    /* silencioso — o banner só aparece quando há resposta */
+let statusPromise = null;
+
+// Pedido único, partilhado: o banner de demonstração e o player perguntam o mesmo.
+function getStatus() {
+  if (!statusPromise) {
+    statusPromise = fetch('/api/status')
+      .then((res) => (res.ok ? res.json() : {}))
+      .catch(() => ({}));
   }
+  return statusPromise;
 }
-checkStatus();
+
+getStatus().then((status) => { mockBanner.hidden = !status.mock; });
 
 // ---------- Utilitários de formatação (pt-PT) ----------
 
@@ -524,13 +526,150 @@ function loadYouTubeApi() {
   return ytApiPromise;
 }
 
-let activePlayer = null; // { yt, timer }
+let activePlayer = null; // { yt?, video?, timer }
 
 function destroyPlayer() {
   if (!activePlayer) return;
   clearInterval(activePlayer.timer);
+  const { video } = activePlayer;
+  if (video) {
+    // Sem limpar o src o Safari continua a puxar bytes do vídeo anterior.
+    try { video.pause(); video.removeAttribute('src'); video.load(); } catch { /* já removido */ }
+  }
   try { activePlayer.yt?.destroy(); } catch { /* já removido do DOM */ }
   activePlayer = null;
+}
+
+// ---------------------------------------------------------------------------
+// Resolvedor de streams — reprodução sem anúncios
+//
+// O player embutido nunca é ad-free no iPad: o Safari bloqueia cookies de terceiros,
+// por isso o iframe é sempre uma sessão anónima, mesmo com Premium na conta. Quando
+// há um resolvedor configurado (server/resolve.js, ver README), pedimos-lhe o URL do
+// stream e tocamo-lo num <video> nosso — sem anúncios e sem YouTube no meio. Sem
+// resolvedor, ou se ele falhar, fica o iframe de sempre.
+// ---------------------------------------------------------------------------
+
+const RESOLVER_KEY = 'kidtube-resolver';
+
+function resolverConfig() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(RESOLVER_KEY));
+    const base = String(raw?.base || '').trim().replace(/\/+$/, '');
+    if (!/^https?:\/\//.test(base)) return null;
+    return { base, token: String(raw?.token || '') };
+  } catch {
+    return null;
+  }
+}
+
+function resolverUrl(resolver, path) {
+  const u = new URL(resolver.base + path);
+  if (resolver.token) u.searchParams.set('t', resolver.token);
+  return u.href;
+}
+
+// Resolve quando os metadados chegam — é o primeiro momento em que se sabe que a
+// fonte é mesmo reproduzível; um URL preso a outro IP só falha aqui.
+function loadSource(video, src, timeoutMs = 20000) {
+  return new Promise((ok, bad) => {
+    const cleanup = () => {
+      clearTimeout(timer);
+      video.removeEventListener('loadedmetadata', onOk);
+      video.removeEventListener('error', onBad);
+    };
+    const onOk = () => { cleanup(); ok(); };
+    const onBad = () => { cleanup(); bad(new Error('fonte rejeitada')); };
+    const timer = setTimeout(onBad, timeoutMs);
+    video.addEventListener('loadedmetadata', onOk);
+    video.addEventListener('error', onBad);
+    video.src = src;
+    video.load();
+  });
+}
+
+function wireNativeControls(video, ctx) {
+  const { player, shield, bigPlay, playBtn, seek, clock, fsBtn } = ctx;
+
+  const timer = setInterval(() => {
+    const dur = Number.isFinite(video.duration) ? video.duration : 0;
+    if (dur > 0 && !seek.matches(':active')) {
+      seek.value = String((video.currentTime / dur) * 100);
+    }
+    clock.textContent = `${formatClock(video.currentTime)} / ${formatClock(dur)}`;
+  }, 500);
+  activePlayer = { video, timer };
+
+  const sync = () => {
+    const playing = !video.paused && !video.ended;
+    playBtn.textContent = playing ? '❚❚' : '▶';
+    bigPlay.textContent = video.ended ? '↺' : '▶';
+    shield.classList.toggle('is-playing', playing);
+  };
+  for (const ev of ['play', 'pause', 'ended']) video.addEventListener(ev, sync);
+  sync();
+
+  const toggle = () => {
+    if (video.ended) { video.currentTime = 0; video.play().catch(() => {}); }
+    else if (video.paused) video.play().catch(() => {});
+    else video.pause();
+  };
+  shield.addEventListener('click', toggle);
+  playBtn.addEventListener('click', toggle);
+
+  seek.addEventListener('input', () => {
+    const dur = Number.isFinite(video.duration) ? video.duration : 0;
+    if (dur > 0) video.currentTime = (Number(seek.value) / 100) * dur;
+  });
+
+  fsBtn.addEventListener('click', () => {
+    // No iPad o Fullscreen API não existe para divs — só o próprio <video> entra em
+    // ecrã inteiro (aí com os controlos do sistema, que continuam a ser os do iOS).
+    if (video.webkitEnterFullscreen) return video.webkitEnterFullscreen();
+    if (document.fullscreenElement) return document.exitFullscreen();
+    if (player.requestFullscreen) {
+      player.requestFullscreen().catch(() => player.classList.toggle('fs-fallback'));
+    } else {
+      player.classList.toggle('fs-fallback');
+    }
+  });
+}
+
+async function attachNative(resolver, videoId, ctx) {
+  const res = await fetch(resolverUrl(resolver, `/api/stream/${videoId}`), { mode: 'cors' });
+  if (!res.ok) throw new Error(`resolvedor devolveu ${res.status}`);
+  const info = await res.json();
+  if (!ctx.mount.isConnected) return; // já navegámos para outra página
+
+  const video = document.createElement('video');
+  video.className = 'player-video';
+  video.playsInline = true;
+  video.setAttribute('playsinline', '');
+  video.setAttribute('webkit-playsinline', '');
+  video.preload = 'auto';
+  video.controls = false;
+
+  // Por ordem de preferência. Os dois primeiros vão direitos ao YouTube e não custam
+  // nada ao servidor; os outros dois passam por ele, e só fazem falta quando o YouTube
+  // prende o URL ao IP de quem o resolveu (o caso do VPS, em que o iPad tem outro IP).
+  // O HLS encaminhado vem antes do progressivo encaminhado por ser 1080p contra 360p.
+  const sources = [info.url];
+  if (info.fallback?.url) sources.push(info.fallback.url);
+  if (info.kind === 'hls') sources.push(resolverUrl(resolver, `/api/hls/${videoId}/master.m3u8`));
+  sources.push(resolverUrl(resolver, `/api/stream/${videoId}/proxy`));
+
+  let lastErr = null;
+  let loaded = false;
+  for (const src of sources) {
+    try { await loadSource(video, src); loaded = true; break; }
+    catch (err) { lastErr = err; }
+  }
+  if (!loaded) throw lastErr || new Error('nenhuma fonte reproduzível');
+  if (!ctx.mount.isConnected) return;
+
+  ctx.mount.replaceWith(video);
+  wireNativeControls(video, ctx);
+  video.play().catch(() => { /* o iPad pode exigir um toque: fica o botão ▶ */ });
 }
 
 function formatClock(totalSeconds) {
@@ -578,10 +717,38 @@ function buildPlayer(videoId) {
     return player;
   }
 
+  const ctx = { player, frame, mount, shield, bigPlay, playBtn, seek, clock, fsBtn };
+
+  // Um resolvedor colado à mão manda; senão, se for o próprio servidor a servir a
+  // app e ele resolver streams, usa-se esse — sem configuração nenhuma.
+  const manual = resolverConfig();
+  const chosen = manual
+    ? Promise.resolve(manual)
+    : getStatus().then((s) => (s.resolver ? { base: location.origin, token: '' } : null));
+
+  chosen.then((resolver) => {
+    if (!ctx.mount.isConnected) return; // já navegámos para outra página
+    if (!resolver) return attachEmbed(videoId, ctx);
+    attachNative(resolver, videoId, ctx).catch((err) => {
+      console.warn('resolvedor falhou (%s) — a usar o player embutido', err.message);
+      if (ctx.mount.isConnected) attachEmbed(videoId, ctx);
+    });
+  });
+
+  return player;
+}
+
+function attachEmbed(videoId, ctx) {
+  const { player, frame, mount, shield, bigPlay, playBtn, seek, clock, fsBtn } = ctx;
+
   loadYouTubeApi().then(() => {
     if (!mount.isConnected) return; // já navegámos para outra página
     const yt = new YT.Player(mount, {
       videoId,
+      // Este caminho é o plano B (sem resolvedor) e leva anúncios de qualquer forma:
+      // no iPad o Safari não deixa passar os cookies da sessão para dentro do iframe,
+      // por isso nem uma conta Premium o torna ad-free. Sendo assim, fica o domínio
+      // nocookie — pelo menos não deixa rasto de tracking no aparelho da criança.
       host: 'https://www.youtube-nocookie.com',
       playerVars: {
         controls: 0, rel: 0, playsinline: 1, disablekb: 1,
@@ -636,8 +803,6 @@ function buildPlayer(videoId) {
     frame.replaceChildren(el('div', 'player-error',
       'Não foi possível carregar o vídeo. Verifica a ligação e tenta de novo.'));
   });
-
-  return player;
 }
 
 function route() {

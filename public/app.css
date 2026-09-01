@@ -287,8 +287,10 @@ a { color: inherit; text-decoration: none; }
   background: #000;
 }
 
-/* O iframe nunca recebe toques — impede qualquer clique para youtube.com. */
-.player-frame iframe {
+/* Nem o iframe nem o <video> recebem toques: o iframe porque um clique levaria ao
+   youtube.com, o vídeo porque quem trata dos toques é o .player-shield por cima. */
+.player-frame iframe,
+.player-frame video {
   position: absolute;
   inset: 0;
   width: 100%;

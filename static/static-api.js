@@ -820,7 +820,9 @@
       return originalFetch(input, init);
     }
 
-    if (!url.pathname.includes('/api/')) {
+    // Só a API do próprio site é servida pelo shim. O resolvedor de streams vive
+    // noutra origem e também tem rotas /api/ — essas têm de passar para a rede.
+    if (url.origin !== location.origin || !url.pathname.includes('/api/')) {
       return originalFetch(input, init);
     }
 
