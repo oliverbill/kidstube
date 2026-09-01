@@ -29,9 +29,11 @@ WORKDIR /app
 COPY server ./server
 COPY public ./public
 
-# data/ (config, PIN, bloqueios) e o estado do OAuth vivem em volumes — a imagem
-# é descartável, o estado não.
-RUN mkdir -p /app/data && chown -R node:node /app/data
+# data/ (config, PIN, bloqueios) e secrets/ (refresh_token do Google) vivem em
+# volumes — a imagem é descartável, o estado não. Ambos têm de existir na imagem
+# e pertencer ao `node`: um volume nomeado herda o dono da pasta que cobre, e sem
+# isto nasce do root, com o processo (que corre como node) sem lá poder escrever.
+RUN mkdir -p /app/data /app/secrets && chown -R node:node /app/data /app/secrets
 USER node
 
 ENV PORT=8478
