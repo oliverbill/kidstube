@@ -390,6 +390,14 @@ async function viewWatch(id) {
     app.replaceChildren();
     const wrap = el('div', 'watch');
 
+    const backBtn = el('button', 'watch-back', '← Voltar');
+    backBtn.type = 'button';
+    backBtn.addEventListener('click', () => {
+      if (history.length > 1) history.back();
+      else location.hash = '#home';
+    });
+    wrap.appendChild(backBtn);
+
     wrap.appendChild(buildPlayer(v.id));
 
     wrap.appendChild(el('h1', 'watch-title', v.title || ''));
