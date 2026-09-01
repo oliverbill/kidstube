@@ -43,7 +43,20 @@
         <button type="submit" class="btn btn-primary">Entrar</button>
       </form>
 
+      <!-- Definir PIN novo, vindo do link enviado por email -->
+      <form id="pin-reset-form" hidden autocomplete="off">
+        <label for="pin-reset-new">Novo PIN</label>
+        <input id="pin-reset-new" type="password" inputmode="numeric" autocomplete="new-password"
+               minlength="4" maxlength="12" required placeholder="mín. 4 dígitos">
+        <label for="pin-reset-new2">Confirmar PIN</label>
+        <input id="pin-reset-new2" type="password" inputmode="numeric" autocomplete="new-password"
+               minlength="4" maxlength="12" required placeholder="repita o PIN">
+        <button type="submit" class="btn btn-primary">Guardar PIN novo</button>
+      </form>
+
       <p id="pin-error" class="error" hidden></p>
+      <p id="pin-note" class="hint" hidden></p>
+      <button type="button" id="pin-forgot" class="linkish" hidden>Esqueci-me do PIN</button>
       <a class="back-link" href="/">← Voltar à app</a>
     </div>
   </div>

@@ -195,6 +195,21 @@ select {
 }
 .back-link:hover { color: var(--text); }
 
+/* Botão que se lê como ligação: acção secundária que não deve competir com o
+   "Entrar", mas que continua a ser um <button> por ser uma acção, não um destino. */
+.linkish {
+  background: none;
+  border: 0;
+  padding: 8px 0;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 0.95rem;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.linkish:hover:not(:disabled) { color: var(--text); }
+.linkish:disabled { opacity: 0.6; cursor: default; }
+
 .tabs {
   display: flex;
   gap: 4px;

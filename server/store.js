@@ -75,6 +75,55 @@ function setPin(pin) {
   save();
 }
 
+// ---------- Reposição do PIN por email ----------
+//
+// Vive em memória: um reinício do servidor invalida um pedido em curso, e o custo
+// disso é pedir outro email. Guardar no disco daria persistência a um token que
+// existe para ser usado nos próximos minutos.
+
+const RESET_TTL_MS = 15 * 60_000;
+const RESET_COOLDOWN_MS = 5 * 60_000;
+let reset = null; // { hash, expiresAt }
+let lastResetRequest = 0;
+
+function resetCooldownMs() {
+  const left = lastResetRequest + RESET_COOLDOWN_MS - Date.now();
+  return left > 0 ? left : 0;
+}
+
+// Devolve o token em claro — é o que vai no email. Em memória fica só o resumo,
+// para que quem leia o processo não encontre um token utilizável.
+function createPinReset() {
+  const token = crypto.randomBytes(32).toString('base64url');
+  reset = {
+    hash: crypto.createHash('sha256').update(token).digest(),
+    expiresAt: Date.now() + RESET_TTL_MS,
+  };
+  return token;
+}
+
+// Só depois de o email sair. Marcar o intervalo antes de enviar deixaria alguém
+// bloqueado 5 minutos por causa de uma falha de que nem chegou a beneficiar.
+function markPinResetSent() {
+  lastResetRequest = Date.now();
+}
+
+// Devolve: 'ok' | 'invalido'. Consome o token: serve uma vez só.
+function consumePinReset(token, newPin) {
+  if (!reset || reset.expiresAt < Date.now() || !token) return 'invalido';
+
+  const given = crypto.createHash('sha256').update(String(token)).digest();
+  if (!crypto.timingSafeEqual(reset.hash, given)) return 'invalido';
+
+  reset = null;
+  setPin(newPin);
+  // Quem repõe o PIN acabou de provar que tem acesso ao email — não faz sentido
+  // deixá-lo à espera de um bloqueio que as tentativas falhadas causaram.
+  RATE.failures = 0;
+  RATE.lockedUntil = 0;
+  return 'ok';
+}
+
 // Rate-limit de verificação: 5 falhas seguidas → recusar 60s.
 const RATE = { failures: 0, lockedUntil: 0 };
 const MAX_FAILURES = 5;
@@ -173,6 +222,10 @@ module.exports = {
   setPin,
   verifyPin,
   pinLockedForMs,
+  createPinReset,
+  markPinResetSent,
+  consumePinReset,
+  resetCooldownMs,
   setApiKey,
   blockChannel,
   unblockChannel,

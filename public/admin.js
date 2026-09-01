@@ -81,7 +81,10 @@ async function handleApiResponse(resp, opts) {
     throw new ApiError(401, 'PIN inválido');
   }
   if (resp.status === 429) {
-    throw new ApiError(429, 'Demasiadas tentativas falhadas. Aguarde 60 segundos e tente de novo.');
+    // Nem todos os 429 são tentativas falhadas de PIN: o intervalo entre emails de
+    // reposição também devolve 429, e explica-se melhor a si próprio.
+    throw new ApiError(429,
+      (data && data.error) || 'Demasiadas tentativas falhadas. Aguarde 60 segundos e tente de novo.');
   }
   if (!resp.ok) {
     throw new ApiError(resp.status, (data && data.error) || `Erro ${resp.status}`);
@@ -230,12 +233,100 @@ function showPinScreen(subtitle, setupMode = false) {
   $('#pin-screen').hidden = false;
   $('#pin-setup-form').hidden = !setupMode;
   $('#pin-entry-form').hidden = setupMode;
+  $('#pin-reset-form').hidden = true;
   $('#pin-title').textContent = setupMode ? 'Definir PIN de administração' : 'Administração';
   $('#pin-subtitle').textContent = subtitle || '';
   showError('#pin-error', '');
+  // O "esqueci-me" só faz sentido a pedir o PIN, e só se o servidor souber enviar email.
+  if (!setupMode) offerPinReset();
   const focusEl = setupMode ? $('#pin-new') : $('#pin-input');
   setTimeout(() => focusEl.focus(), 50);
 }
+
+// ---------------------------------------------------------------------------
+// Reposição do PIN por email
+// ---------------------------------------------------------------------------
+
+// Na variante estática o PIN vive no Worker, que não envia email: lá o botão não
+// aparece de todo.
+async function offerPinReset() {
+  const btn = $('#pin-forgot');
+  if (!btn || IS_STATIC) return;
+  try {
+    const { available, hint } = await api('GET', '/api/admin/pin/reset', undefined, { noPin: true });
+    btn.hidden = !available;
+    btn.dataset.hint = hint || '';
+  } catch {
+    btn.hidden = true; // servidor antigo ou offline: não prometer o que não há
+  }
+}
+
+$('#pin-forgot')?.addEventListener('click', async () => {
+  const btn = $('#pin-forgot');
+  showError('#pin-error', '');
+  btn.disabled = true;
+  btn.textContent = 'A enviar…';
+  try {
+    const { hint } = await api('POST', '/api/admin/pin/reset/request', {}, { noPin: true });
+    const note = $('#pin-note');
+    note.hidden = false;
+    note.textContent = `Email enviado para ${hint}. O link é válido 15 minutos.`;
+    btn.hidden = true;
+  } catch (err) {
+    showError('#pin-error', err.message);
+    btn.disabled = false;
+    btn.textContent = 'Esqueci-me do PIN';
+  }
+});
+
+// O link do email traz #reset=<token>. Tira-se logo do URL: fica no histórico do
+// browser e na barra de endereço, e é uma chave de uso único.
+function pendingResetToken() {
+  const m = (location.hash || '').match(/^#reset=(.+)$/);
+  if (!m) return null;
+  history.replaceState(null, '', location.pathname + location.search);
+  return decodeURIComponent(m[1]);
+}
+
+// Abrir o link do email com o painel já aberto no mesmo separador muda só o #, e
+// isso não recarrega a página — sem isto, o link parecia não fazer nada.
+window.addEventListener('hashchange', () => {
+  const token = pendingResetToken();
+  if (token && !IS_STATIC) showPinResetScreen(token);
+});
+
+function showPinResetScreen(token) {
+  $('#admin-screen').hidden = true;
+  $('#pin-screen').hidden = false;
+  $('#pin-setup-form').hidden = true;
+  $('#pin-entry-form').hidden = true;
+  $('#pin-forgot').hidden = true;
+  $('#pin-reset-form').hidden = false;
+  $('#pin-reset-form').dataset.token = token;
+  $('#pin-title').textContent = 'Definir PIN novo';
+  $('#pin-subtitle').textContent = 'Confirmaste o pedido por email. Escolhe o PIN novo.';
+  showError('#pin-error', '');
+  setTimeout(() => $('#pin-reset-new').focus(), 50);
+}
+
+$('#pin-reset-form')?.addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  showError('#pin-error', '');
+  const pin = $('#pin-reset-new').value;
+  if (pin !== $('#pin-reset-new2').value) {
+    return showError('#pin-error', 'Os dois PINs não coincidem.');
+  }
+  try {
+    await api('POST', '/api/admin/pin/reset/confirm',
+      { token: $('#pin-reset-form').dataset.token, pin }, { noPin: true });
+    setPin(pin);
+    $('#pin-reset-form').reset();
+    await showAdminScreen();
+    flash('PIN alterado.');
+  } catch (err) {
+    showError('#pin-error', err.message);
+  }
+});
 
 async function showAdminScreen() {
   $('#pin-screen').hidden = true;
@@ -265,6 +356,14 @@ async function boot() {
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js').catch(() => { /* PWA opcional */ });
   }
+  // Um link de reposição manda em tudo o resto: quem o abriu não sabe o PIN, e não
+  // vale a pena mostrar-lhe primeiro o ecrã a pedi-lo.
+  const resetToken = pendingResetToken();
+  if (resetToken && !IS_STATIC) {
+    showPinResetScreen(resetToken);
+    return;
+  }
+
   // O bloco da conta do YouTube existe nas duas variantes: na estática fala com o
   // Worker, servida do servidor fala com o próprio servidor.
   let status;

@@ -12,6 +12,7 @@ const yt = require('./youtube');
 const resolve = require('./resolve');
 const hls = require('./hls');
 const google = require('./google');
+const mailer = require('./mailer');
 const mockdata = require('./mockdata');
 
 const PORT = Number(process.env.PORT) || 8478;
@@ -180,14 +181,24 @@ function serveMockThumb(res, id) {
 const RESOLVER_TOKEN = process.env.KIDTUBE_RESOLVER_TOKEN || '';
 const RESOLVER_ONLY = process.env.KIDTUBE_RESOLVER_ONLY === '1';
 
-// O Google exige que o redirect_uri seja exactamente o registado na consola. Atrás
-// do Caddy o pedido chega em http, daí o X-Forwarded-Proto.
-function oauthRedirectUri(req) {
-  if (process.env.KIDTUBE_PUBLIC_URL) {
-    return `${process.env.KIDTUBE_PUBLIC_URL.replace(/\/+$/, '')}/api/oauth/callback`;
-  }
+// Endereço público do serviço. Atrás do túnel o pedido chega em http, daí o
+// X-Forwarded-Proto — e o KIDTUBE_PUBLIC_URL manda quando está definido.
+function publicBase(req) {
+  if (process.env.KIDTUBE_PUBLIC_URL) return process.env.KIDTUBE_PUBLIC_URL.replace(/\/+$/, '');
   const proto = req.headers['x-forwarded-proto'] || 'http';
-  return `${proto}://${req.headers.host}/api/oauth/callback`;
+  return `${proto}://${req.headers.host}`;
+}
+
+// O Google exige que o redirect_uri seja exactamente o registado na consola.
+function oauthRedirectUri(req) {
+  return `${publicBase(req)}/api/oauth/callback`;
+}
+
+// "alves.bill@gmail.com" -> "al•••@gmail.com". Confirma a caixa certa a quem já a
+// conhece, sem a revelar a quem abriu a página de administração por acaso.
+function maskEmail(addr) {
+  const m = String(addr || '').match(/^(.{1,2})[^@]*(@.+)$/);
+  return m ? `${m[1]}•••${m[2]}` : '';
 }
 
 function corsHeaders() {
@@ -479,6 +490,63 @@ async function handleApi(req, res, url) {
       if (!requirePin(req, res)) return;
     }
     store.setPin(pin);
+    return sendJson(res, 200, { ok: true });
+  }
+
+  // Reposição do PIN por email. Públicas por necessidade — quem esqueceu o PIN não
+  // o pode provar. O que as segura: o email vai sempre para o endereço fixo em
+  // KIDTUBE_RESET_EMAIL (nunca para um indicado no pedido) e há um intervalo mínimo
+  // entre pedidos, para isto não servir de máquina de spam contra essa caixa.
+
+  if (method === 'GET' && p === '/api/admin/pin/reset') {
+    return sendJson(res, 200, {
+      available: mailer.configured() && Boolean(mailer.recipient()),
+      hint: maskEmail(mailer.recipient()),
+    });
+  }
+
+  if (method === 'POST' && p === '/api/admin/pin/reset/request') {
+    const to = mailer.recipient();
+    if (!mailer.configured() || !to) {
+      return sendError(res, 503, 'Reposição por email não configurada no servidor.');
+    }
+    const espera = store.resetCooldownMs();
+    if (espera > 0) {
+      return sendError(res, 429,
+        `Já foi enviado um email há pouco. Tenta daqui a ${Math.ceil(espera / 60000)} min.`);
+    }
+
+    const token = store.createPinReset();
+    const link = `${publicBase(req)}/admin.html#reset=${token}`;
+    try {
+      await mailer.send({
+        to,
+        subject: 'KidTube — repor o PIN parental',
+        text: [
+          'Foi pedida a reposição do PIN parental do KidTube.',
+          '',
+          'Abre este link para definir um PIN novo (válido 15 minutos, uma só vez):',
+          link,
+          '',
+          'Se não foste tu, ignora este email: sem este link o PIN não muda.',
+        ].join('\n'),
+      });
+    } catch (err) {
+      console.error('reset:', err.message);
+      return sendError(res, 502, 'Não foi possível enviar o email. Ver os registos do servidor.');
+    }
+    store.markPinResetSent();
+    return sendJson(res, 200, { ok: true, hint: maskEmail(to) });
+  }
+
+  if (method === 'POST' && p === '/api/admin/pin/reset/confirm') {
+    const body = await readBody(req);
+    const pin = String(body.pin ?? '').trim();
+    if (pin.length < 4) return sendError(res, 400, 'O PIN tem de ter pelo menos 4 dígitos.');
+    if (store.consumePinReset(String(body.token || ''), pin) !== 'ok') {
+      return sendError(res, 400, 'Link inválido ou expirado. Pede um email novo.');
+    }
+    console.log('PIN reposto por email.');
     return sendJson(res, 200, { ok: true });
   }
 

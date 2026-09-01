@@ -100,6 +100,8 @@ Variáveis:
 | `KIDTUBE_COOKIES` | *(vazio)* | `cookies.txt` da conta do YouTube |
 | `KIDTUBE_GOOGLE_STATE` | `.google-oauth.json` | Onde fica o `refresh_token` do Google |
 | `GOOGLE_CLIENT_ID` / `_SECRET` | *(vazio)* | OAuth da conta; sem isto não há inscrições |
+| `KIDTUBE_RESET_EMAIL` | *(vazio)* | Caixa que recebe o link de reposição do PIN |
+| `KIDTUBE_SMTP_HOST/PORT/USER/PASS` | `smtp.gmail.com`, `465` | Envio do email; no Gmail a `PASS` é uma palavra-passe de aplicação |
 | `KIDTUBE_MAX_HEIGHT` | `1080` | Tecto de qualidade |
 | `KIDTUBE_RESOLVER_ONLY` | `0` | `1` = só resolvedor, não serve a app (não é o caso aqui) |
 | `KIDTUBE_RESOLVER_TOKEN` | *(vazio)* | Token nas rotas do resolvedor; desnecessário com a app na mesma origem |
@@ -142,6 +144,24 @@ Em `https://kidstube.oliversys.tech/admin.html`:
 Não é preciso configurar resolvedor nenhum: servida deste servidor, a app descobre-o sozinha
 pelo `/api/status`. A secção "Reprodução sem anúncios" da administração só faz falta quando a
 app é servida de outro sítio.
+### Esquecer o PIN
+
+O ecrã do PIN tem **"Esqueci-me do PIN"**, que envia um link para a caixa em
+`KIDTUBE_RESET_EMAIL` — sempre essa, nunca uma indicada no pedido, para o botão não servir de
+máquina de spam contra terceiros. O link vale **15 minutos**, serve **uma só vez**, e repor o
+PIN limpa também o bloqueio das tentativas falhadas (quem esqueceu o PIN costuma chegar aqui
+já bloqueado). Entre emails há um intervalo de 5 minutos.
+
+O botão só aparece se o servidor souber enviar email. Sem SMTP configurado, um PIN esquecido
+resolve-se por SSH:
+
+```sh
+ssh gomide-vps 'docker exec kidstube node -e "require(\"/app/server/store\").setPin(\"1234\")" && docker restart kidstube'
+```
+
+O `docker restart` é preciso: o `setPin` corre noutro processo e o servidor tem a configuração
+em memória.
+
 ### Largura de banda
 
 O URL que o YouTube devolve traz o IP de quem o pediu lá dentro. Como quem pede é o VPS e quem
