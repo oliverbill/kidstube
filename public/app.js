@@ -87,6 +87,8 @@ function el(tag, className, text) {
 function videoCard(video) {
   const a = el('a', 'card');
   a.href = `#watch/${encodeURIComponent(video.id)}`;
+  a.addEventListener('pointerenter', () => prefetchStream(video.id));
+  a.addEventListener('touchstart', () => prefetchStream(video.id), { passive: true });
 
   const thumb = el('div', 'thumb');
   const img = document.createElement('img');
@@ -559,6 +561,22 @@ function destroyPlayer() {
 // O resolvedor é sempre a própria origem: a app é servida pelo mesmo servidor que
 // resolve. O /api/status diz se este servidor o faz.
 // ---------------------------------------------------------------------------
+
+// Prefetch — dispara o resolvedor (yt-dlp) antes do clique, ao passar o rato ou
+// tocar no card. O /api/stream/:id do servidor faz cache por videoId (resolve.js),
+// por isso repetir o pedido não custa nada: só o primeiro é que corre o yt-dlp; os
+// seguintes (incluindo o clique real) saem do cache. Sem isto, o utilizador só via
+// os ~5s do yt-dlp depois de já ter escolhido o vídeo.
+const prefetched = new Set();
+
+function prefetchStream(videoId) {
+  if (prefetched.has(videoId)) return;
+  prefetched.add(videoId);
+  getStatus().then((status) => {
+    if (!status.resolver) return; // sem resolvedor não há o que aquecer
+    fetch(`/api/stream/${videoId}`).catch(() => { prefetched.delete(videoId); });
+  });
+}
 
 // Resolve quando os metadados chegam — é o primeiro momento em que se sabe que a
 // fonte é mesmo reproduzível; um URL preso a outro IP só falha aqui.
