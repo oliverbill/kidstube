@@ -316,6 +316,21 @@ async function channelUploads(channelId, pageToken) {
   return { videos, nextPageToken: token || null };
 }
 
+// Usado pelo resolvedor de stream (server.js): o resolvedor recebe só o videoId
+// (sem canal), e é acedido por caminhos que não passam por videoDetails (prefetch
+// no hover do card, link direto ao /api/stream/:id) — sem esta verificação própria,
+// um canal ou vídeo bloqueado depois de o card ter sido desenhado continua a reproduzir.
+async function isVideoBlocked(id) {
+  if (usingMock()) {
+    const video = mockdata.VIDEOS.find((v) => v.id === id);
+    return video ? isBlocked(video) : false;
+  }
+  const data = await apiGet('/videos', { part: 'snippet', id });
+  const item = (data.items || [])[0];
+  if (!item) return false;
+  return isBlocked(videoFromSnippet(id, item.snippet, null));
+}
+
 async function channel(channelId, pageToken) {
   if (isChannelBlocked(channelId)) {
     return { channel: { id: channelId, title: '' }, items: [], blocked: true, nextPageToken: null };
@@ -351,4 +366,5 @@ module.exports = {
   searchChannels,
   videoDetails,
   channel,
+  isVideoBlocked,
 };

@@ -357,12 +357,28 @@ async function handleResolver(req, res, url) {
     }
 
     if (hlsMaster) {
-      const info = await resolve.resolveStream(decodeURIComponent(hlsMaster[1]));
+      const hlsVideoId = decodeURIComponent(hlsMaster[1]);
+      if (await yt.isVideoBlocked(hlsVideoId)) {
+        sendCorsJson(res, 403, { error: 'Este vídeo está bloqueado.' });
+        return true;
+      }
+      const info = await resolve.resolveStream(hlsVideoId);
       if (info.kind !== 'hls') {
         sendCorsJson(res, 409, { error: 'Este vídeo não tem HLS.' });
         return true;
       }
       await proxyPlaylist(res, info.url, RESOLVER_TOKEN);
+      return true;
+    }
+
+    const videoId = decodeURIComponent(stream[1]);
+    const wantsProxy = Boolean(stream[2]);
+
+    // Verificação própria do resolvedor: chega aqui por caminhos que não passam pelo
+    // gate de /api/video/:id (prefetch no hover do card, link direto), por isso não
+    // pode confiar apenas no que o cliente já filtrou.
+    if (await yt.isVideoBlocked(videoId)) {
+      sendCorsJson(res, 403, { error: 'Este vídeo está bloqueado.' });
       return true;
     }
 
@@ -373,8 +389,6 @@ async function handleResolver(req, res, url) {
       return true;
     }
 
-    const videoId = decodeURIComponent(stream[1]);
-    const wantsProxy = Boolean(stream[2]);
     // No proxy o cache pode ter um URL que o upstream já rejeita; ?fresh=1 força
     // uma resolução nova antes de desistir.
     if (url.searchParams.get('fresh') === '1') resolve.forget(videoId);
