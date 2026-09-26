@@ -66,6 +66,36 @@ function normalize(s) {
     .replace(/[\u0300-\u036f]/g, "");
 }
 
+// Palavras génericas a mais para servirem de assinatura de um canal — bloquear por
+// "tv" ou "kids" apagaria metade do catálogo. Fora da lista, qualquer palavra do
+// nome do canal (>= 4 carateres) conta como "assinatura" desse canal.
+const NAME_STOPWORDS = new Set([
+  'the', 'and', 'for', 'with', 'from', 'of', 'by', 'new', 'official', 'oficial',
+  'canal', 'channel', 'kids', 'vlog', 'vlogs', 'show', 'media', 'tube', 'play', 'net',
+  'app', 'live', 'video', 'videos', 'world', 'mundo', 'para', 'com', 'uma', 'seu', 'sua',
+]);
+
+// Palavras (>= 4 carateres, sem acentos/pontuação) que identificam um canal pelo nome —
+// usadas para bloquear variantes do mesmo canal ("Guebes ASMR" bloqueia também
+// "GuebesASMR", "@guebesASMR", "Larica do Guebes ASMR", etc.) mesmo sem o channelId bater.
+function nameTokens(title) {
+  return Array.from(new Set(
+    normalize(title)
+      .split(/[^a-z0-9]+/)
+      .filter((t) => t.length >= 4 && !NAME_STOPWORDS.has(t)),
+  ));
+}
+
+// Todas as palavras-assinatura de todos os canais bloqueados, num único array — evitamos
+// recalcular por vídeo dentro de filterVideos ao filtrar uma página inteira de resultados.
+function blockedChannelNameTokens(blocked) {
+  const out = [];
+  for (const c of blocked.channels) {
+    if (c.title) out.push(...nameTokens(c.title));
+  }
+  return out;
+}
+
 function isBlocked(video) {
   const { blocked } = store.getConfig();
   if (blocked.channels.some((c) => c.id === video.channelId)) return true;
@@ -74,7 +104,8 @@ function isBlocked(video) {
   const haystack = normalize(
     `${video.title}\n${video.description || ''}\n${video.channelTitle}\n${tags}`,
   );
-  return blocked.keywords.some((kw) => haystack.includes(normalize(kw)));
+  if (blocked.keywords.some((kw) => haystack.includes(normalize(kw)))) return true;
+  return blockedChannelNameTokens(blocked).some((tok) => haystack.includes(tok));
 }
 
 function filterVideos(videos) {
@@ -90,6 +121,16 @@ function isQueryBlocked(q) {
 function isChannelBlocked(channelId) {
   const { blocked } = store.getConfig();
   return blocked.channels.some((c) => c.id === channelId);
+}
+
+// Canal com nome parecido a um canal já bloqueado (mesma lógica de nameTokens),
+// mesmo que o channelId seja diferente — usado quando já se tem o título em mãos
+// (página do canal, lista de inscrições), sem precisar de outro pedido à API.
+function isChannelNameBlocked(title) {
+  if (!title) return false;
+  const { blocked } = store.getConfig();
+  const norm = normalize(title);
+  return blockedChannelNameTokens(blocked).some((tok) => norm.includes(tok));
 }
 
 // ---------- Utilitários de normalização de shape ----------
@@ -352,6 +393,9 @@ async function channel(channelId, pageToken) {
       videoCount: st?.videoCount ?? null,
     };
   }
+  if (isChannelNameBlocked(info.title)) {
+    return { channel: { id: channelId, title: '' }, items: [], blocked: true, nextPageToken: null };
+  }
   const { videos, nextPageToken } = await channelUploads(channelId, pageToken);
   const items = filterVideos(videos).map(stripDescription);
   return { channel: info, items, blocked: false, nextPageToken };
@@ -367,4 +411,5 @@ module.exports = {
   videoDetails,
   channel,
   isVideoBlocked,
+  isChannelNameBlocked,
 };

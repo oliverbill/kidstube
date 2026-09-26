@@ -479,7 +479,8 @@ async function handleApi(req, res, url) {
 
   if (method === 'GET' && p === '/api/subscriptions') {
     const blockedIds = new Set((store.getConfig().blocked.channels || []).map((c) => c.id));
-    const channels = (await google.subscriptions()).filter((c) => !blockedIds.has(c.id));
+    const channels = (await google.subscriptions())
+      .filter((c) => !blockedIds.has(c.id) && !yt.isChannelNameBlocked(c.title));
     return sendJson(res, 200, { channels });
   }
 
