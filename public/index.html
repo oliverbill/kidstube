@@ -26,16 +26,22 @@
       <a href="#subscriptions">Inscrições</a>
       <a href="#history">Histórico</a>
     </nav>
-    <form id="search-form" class="search" role="search">
-      <input id="search-input" type="search" placeholder="Pesquisar" autocomplete="off"
-             autocapitalize="off" autocorrect="off" spellcheck="false"
-             enterkeyhint="search" aria-label="Pesquisar vídeos">
-      <button type="submit" class="search-btn" aria-label="Pesquisar">
-        <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
-          <path fill="currentColor" d="M20.87 20.17l-5.59-5.59A6.96 6.96 0 0 0 17 10c0-3.87-3.13-7-7-7s-7 3.13-7 7 3.13 7 7 7c1.71 0 3.28-.62 4.5-1.64l5.66 5.66.71-.85zM10 16c-3.31 0-6-2.69-6-6s2.69-6 6-6 6 2.69 6 6-2.69 6-6 6z"/>
-        </svg>
-      </button>
-    </form>
+    <div id="search-wrap" class="search-wrap">
+      <form id="search-form" class="search" role="search">
+        <input id="search-input" type="search" placeholder="Pesquisar" autocomplete="off"
+               autocapitalize="off" autocorrect="off" spellcheck="false"
+               enterkeyhint="search" aria-label="Pesquisar vídeos"
+               role="combobox" aria-expanded="false" aria-controls="search-suggest"
+               aria-autocomplete="list">
+        <button type="submit" class="search-btn" aria-label="Pesquisar">
+          <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+            <path fill="currentColor" d="M20.87 20.17l-5.59-5.59A6.96 6.96 0 0 0 17 10c0-3.87-3.13-7-7-7s-7 3.13-7 7 3.13 7 7 7c1.71 0 3.28-.62 4.5-1.64l5.66 5.66.71-.85zM10 16c-3.31 0-6-2.69-6-6s2.69-6 6-6 6 2.69 6 6-2.69 6-6 6z"/>
+          </svg>
+        </button>
+      </form>
+      <ul id="search-suggest" class="suggest-list" role="listbox"
+          aria-label="Sugestões de pesquisa" hidden></ul>
+    </div>
   </header>
 
   <main id="app" class="content" aria-live="polite"></main>

@@ -4,6 +4,8 @@
 const app = document.getElementById('app');
 const searchForm = document.getElementById('search-form');
 const searchInput = document.getElementById('search-input');
+const searchWrap = document.getElementById('search-wrap');
+const suggestBox = document.getElementById('search-suggest');
 const mockBanner = document.getElementById('mock-banner');
 
 // ---------- Service worker + estado (mock) ----------
@@ -254,6 +256,30 @@ function recordHistory(video) {
   } catch { /* localStorage indisponível/cheio: histórico fica só nesta sessão */ }
 }
 
+// ---------- Pesquisas recentes (por dispositivo) ----------
+
+const SEARCHES_KEY = 'kidtube-searches';
+const SEARCHES_MAX = 20;
+
+function readSearches() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(SEARCHES_KEY));
+    return Array.isArray(raw) ? raw.filter((q) => typeof q === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function recordSearch(query) {
+  const q = String(query || '').trim();
+  if (!q) return;
+  const list = readSearches().filter((s) => s.toLowerCase() !== q.toLowerCase());
+  list.unshift(q);
+  try {
+    localStorage.setItem(SEARCHES_KEY, JSON.stringify(list.slice(0, SEARCHES_MAX)));
+  } catch { /* localStorage indisponível/cheio: fica só nesta sessão */ }
+}
+
 // ---------- Scroll infinito ----------
 
 let scrollObserver = null;
@@ -342,6 +368,7 @@ async function viewSearch(query) {
       });
       return;
     }
+    recordSearch(query); // só o que não foi bloqueado volta a aparecer nas sugestões
     app.replaceChildren();
     app.appendChild(el('h1', 'page-title', `Resultados para “${query}”`));
     if (!data.items?.length) {
@@ -831,8 +858,184 @@ route();
 
 searchForm.addEventListener('submit', (e) => {
   e.preventDefault();
-  const q = searchInput.value.trim();
+  const active = currentSuggestion();
+  const q = (active || searchInput.value).trim();
   if (!q) return;
-  searchInput.blur(); // fecha o teclado no iPad
-  location.hash = `#search/${encodeURIComponent(q)}`;
+  runSearch(q);
 });
+
+function runSearch(q) {
+  hideSuggest();
+  searchInput.value = q;
+  searchInput.blur(); // fecha o teclado no iPad
+  // Repetir a mesma pesquisa não muda o hash (logo não dispara hashchange): refaz à mão.
+  const alvo = `#search/${encodeURIComponent(q)}`;
+  if (location.hash === alvo) viewSearch(q);
+  else location.hash = alvo;
+}
+
+// ---------- Sugestões de pesquisa (recentes + autocomplete do YouTube) ----------
+
+const SUGGEST_MAX = 12;
+let suggestTimer = null;
+let suggestSeq = 0;
+let suggestItems = [];   // os termos atualmente listados, pela ordem em que aparecem
+let suggestIndex = -1;   // item destacado pelas setas (-1 = nenhum)
+
+function normalizeTerm(s) {
+  return String(s || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+function iconClock() {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('width', '22');
+  svg.setAttribute('height', '22');
+  svg.setAttribute('aria-hidden', 'true');
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('fill', 'currentColor');
+  path.setAttribute('d', 'M13 3a9 9 0 1 0 8.49 12h-2.13A7 7 0 1 1 13 5a6.96 6.96 0 0 1 4.9 2.1L15 10h7V3l-2.6 2.6A8.97 8.97 0 0 0 13 3zm-1 5v5.41l4.29 4.3 1.42-1.42L14 12.59V8h-2z');
+  svg.appendChild(path);
+  return svg;
+}
+
+function iconSearch() {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('width', '22');
+  svg.setAttribute('height', '22');
+  svg.setAttribute('aria-hidden', 'true');
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('fill', 'currentColor');
+  path.setAttribute('d', 'M20.87 20.17l-5.59-5.59A6.96 6.96 0 0 0 17 10c0-3.87-3.13-7-7-7s-7 3.13-7 7 3.13 7 7 7c1.71 0 3.28-.62 4.5-1.64l5.66 5.66.71-.85zM10 16c-3.31 0-6-2.69-6-6s2.69-6 6-6 6 2.69 6 6-2.69 6-6 6z');
+  svg.appendChild(path);
+  return svg;
+}
+
+function hideSuggest() {
+  clearTimeout(suggestTimer);
+  suggestSeq++; // invalida qualquer resposta em voo
+  suggestBox.hidden = true;
+  suggestBox.replaceChildren();
+  suggestItems = [];
+  suggestIndex = -1;
+  searchInput.setAttribute('aria-expanded', 'false');
+}
+
+function currentSuggestion() {
+  return suggestIndex >= 0 ? suggestItems[suggestIndex] : null;
+}
+
+// Lista final: primeiro as pesquisas recentes que batem com o que está escrito,
+// depois o autocomplete do YouTube, sem repetir termos.
+function renderSuggest(recent, remote) {
+  const vistos = new Set();
+  const termos = [];
+  for (const t of [...recent, ...remote]) {
+    const key = normalizeTerm(t);
+    if (!key || vistos.has(key)) continue;
+    vistos.add(key);
+    termos.push({ text: t, recent: recent.includes(t) });
+    if (termos.length >= SUGGEST_MAX) break;
+  }
+
+  if (!termos.length) {
+    hideSuggest();
+    return;
+  }
+
+  suggestBox.replaceChildren();
+  suggestItems = termos.map((t) => t.text);
+  suggestIndex = -1;
+
+  termos.forEach((t, i) => {
+    const li = el('li');
+    li.setAttribute('role', 'option');
+    li.setAttribute('aria-selected', 'false');
+    const btn = el('button', 'suggest-item');
+    btn.type = 'button';
+    btn.id = `suggest-opt-${i}`;
+    btn.appendChild(t.recent ? iconClock() : iconSearch());
+    btn.appendChild(el('span', null, t.text));
+    // pointerdown (e não click): o blur do input fecharia a lista antes do clique chegar.
+    btn.addEventListener('pointerdown', (ev) => {
+      ev.preventDefault();
+      runSearch(t.text);
+    });
+    li.appendChild(btn);
+    suggestBox.appendChild(li);
+  });
+
+  suggestBox.hidden = false;
+  searchInput.setAttribute('aria-expanded', 'true');
+}
+
+function highlight(next) {
+  const botoes = suggestBox.querySelectorAll('.suggest-item');
+  if (!botoes.length) return;
+  if (suggestIndex >= 0) {
+    botoes[suggestIndex].classList.remove('is-active');
+    botoes[suggestIndex].parentElement.setAttribute('aria-selected', 'false');
+  }
+  suggestIndex = next;
+  if (suggestIndex >= 0) {
+    const btn = botoes[suggestIndex];
+    btn.classList.add('is-active');
+    btn.parentElement.setAttribute('aria-selected', 'true');
+    btn.scrollIntoView({ block: 'nearest' });
+    searchInput.setAttribute('aria-activedescendant', btn.id);
+  } else {
+    searchInput.removeAttribute('aria-activedescendant');
+  }
+}
+
+function recentesPara(q) {
+  const nq = normalizeTerm(q);
+  const todas = readSearches();
+  if (!nq) return todas.slice(0, 6);
+  return todas.filter((s) => normalizeTerm(s).includes(nq)).slice(0, 6);
+}
+
+async function openSuggest() {
+  const q = searchInput.value.trim();
+  const recent = recentesPara(q);
+
+  // O que está em memória aparece já; o autocomplete do servidor entra por cima.
+  renderSuggest(recent, []);
+  if (!q) return;
+
+  const seq = ++suggestSeq;
+  try {
+    const data = await apiGet(`/api/suggest?q=${encodeURIComponent(q)}`);
+    if (seq !== suggestSeq) return; // outra letra foi escrita entretanto
+    renderSuggest(recentesPara(q), data.items || []);
+  } catch { /* autocomplete é conveniência: fica só com as recentes */ }
+}
+
+searchInput.addEventListener('input', () => {
+  clearTimeout(suggestTimer);
+  suggestTimer = setTimeout(() => { openSuggest(); }, 150);
+});
+
+searchInput.addEventListener('focus', () => { openSuggest(); });
+
+searchInput.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape') {
+    hideSuggest();
+    return;
+  }
+  if (suggestBox.hidden || !suggestItems.length) return;
+  if (ev.key === 'ArrowDown') {
+    ev.preventDefault();
+    highlight(suggestIndex + 1 >= suggestItems.length ? -1 : suggestIndex + 1);
+  } else if (ev.key === 'ArrowUp') {
+    ev.preventDefault();
+    highlight(suggestIndex <= -1 ? suggestItems.length - 1 : suggestIndex - 1);
+  }
+});
+
+document.addEventListener('pointerdown', (ev) => {
+  if (!searchWrap.contains(ev.target)) hideSuggest();
+});
+
+window.addEventListener('hashchange', hideSuggest);

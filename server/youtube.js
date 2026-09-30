@@ -279,6 +279,54 @@ async function search(q, pageToken) {
   return { blockedQuery: false, items: filterVideos(videos).map(stripDescription), nextPageToken };
 }
 
+// Sugestões de pesquisa — o mesmo endpoint de autocomplete que o YouTube usa no seu
+// próprio campo de busca (não gasta quota da Data API e não precisa de chave). Cada
+// sugestão passa pelo mesmo filtro de palavras bloqueadas que a pesquisa.
+const SUGGEST_URL = 'https://suggestqueries.google.com/complete/search';
+const SUGGEST_TTL_MS = 60 * 60 * 1000;
+const suggestCache = new Map(); // q normalizada -> { at, raw }
+
+async function suggest(q) {
+  const query = String(q || '').trim();
+  if (!query || query.length > 100) return { items: [] };
+  if (isQueryBlocked(query)) return { items: [] };
+
+  const key = normalize(query);
+  const hit = suggestCache.get(key);
+  // O cache guarda a resposta crua e filtra a cada leitura: bloquear uma palavra na
+  // administração tem efeito já no pedido seguinte, sem esperar o TTL.
+  if (hit && Date.now() - hit.at < SUGGEST_TTL_MS) return { items: filterSuggestions(hit.raw) };
+
+  let raw = [];
+  try {
+    const url = new URL(SUGGEST_URL);
+    url.searchParams.set('client', 'firefox'); // resposta em JSON simples: [termo, [sugestões]]
+    url.searchParams.set('ds', 'yt');
+    url.searchParams.set('hl', 'pt');
+    url.searchParams.set('q', query);
+    const res = await fetch(url, { signal: AbortSignal.timeout(4000) });
+    if (res.ok) {
+      const data = JSON.parse(await res.text());
+      if (Array.isArray(data?.[1])) raw = data[1].filter((s) => typeof s === 'string');
+    }
+  } catch {
+    // Autocomplete é conveniência: sem rede ou com resposta estranha, devolve vazio.
+    return { items: [] };
+  }
+
+  suggestCache.set(key, { at: Date.now(), raw });
+  if (suggestCache.size > 500) {
+    for (const [k, v] of suggestCache) if (Date.now() - v.at >= SUGGEST_TTL_MS) suggestCache.delete(k);
+  }
+  return { items: filterSuggestions(raw) };
+}
+
+// Cai fora a sugestão que bate numa palavra-chave bloqueada e também a que nomeia
+// um canal bloqueado — a criança não chega ao canal proibido pelo autocomplete.
+function filterSuggestions(raw) {
+  return raw.filter((s) => !isQueryBlocked(s) && !isChannelNameBlocked(s)).slice(0, 10);
+}
+
 // Pesquisa de canais por nome/@handle (para a administração escolher qual bloquear).
 async function searchChannels(q) {
   const query = String(q || '').trim();
@@ -407,6 +455,7 @@ module.exports = {
   isoDuration,
   home,
   search,
+  suggest,
   searchChannels,
   videoDetails,
   channel,

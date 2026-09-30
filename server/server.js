@@ -498,6 +498,12 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, result);
   }
 
+  if (method === 'GET' && p === '/api/suggest') {
+    const q = (url.searchParams.get('q') || '').trim();
+    if (!q) return sendJson(res, 200, { items: [] });
+    return sendJson(res, 200, await yt.suggest(q));
+  }
+
   let m = p.match(/^\/api\/video\/([^/]+)$/);
   if (method === 'GET' && m) {
     const result = await yt.videoDetails(decodeURIComponent(m[1]));
