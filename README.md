@@ -14,6 +14,14 @@ KIDTUBE_API_KEY='<a-tua-chave>' node server/server.js
 
 Servidor em `http://localhost:8478`. Sem dependências npm — só Node ≥ 18.
 
+## Deploy
+
+`git push` para o `main` **não atualiza o site ao vivo** — o container no VPS continua rodando
+a imagem antiga até ser reconstruído. Depois de todo push, implantar no VPS (srv1940186,
+`/opt`, Docker Compose): `git pull` no checkout do servidor seguido de
+`docker compose up -d --build`. Sem esse passo, uma feature pode estar commitada e pushada e
+mesmo assim não aparecer em `https://kidstube.oliversys.tech` (já aconteceu).
+
 ## Instalar no iPad
 
 1. No Safari do iPad, abre `https://kidstube.oliversys.tech`.
