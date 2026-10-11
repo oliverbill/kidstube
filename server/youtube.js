@@ -5,6 +5,13 @@
 
 const store = require('./store');
 const mockdata = require('./mockdata');
+const { PINNED_CHANNELS } = require('./google');
+
+// Canais fixos da família (ex.: @danadinhos) nunca podem cair no bloqueio por
+// nome/token — o matching por substring de isChannelNameBlocked/isBlocked pega
+// variantes de outros canais bloqueados (ex. "... ASMR") e já capturou esse canal
+// por engano.
+const ALWAYS_ALLOWED_CHANNEL_IDS = new Set(PINNED_CHANNELS.map((c) => c.id));
 
 const API_BASE = 'https://www.googleapis.com/youtube/v3';
 
@@ -97,6 +104,7 @@ function blockedChannelNameTokens(blocked) {
 }
 
 function isBlocked(video) {
+  if (ALWAYS_ALLOWED_CHANNEL_IDS.has(video.channelId)) return false;
   const { blocked } = store.getConfig();
   if (blocked.channels.some((c) => c.id === video.channelId)) return true;
   if (blocked.videos.some((v) => v.id === video.id)) return true;
@@ -119,6 +127,7 @@ function isQueryBlocked(q) {
 }
 
 function isChannelBlocked(channelId) {
+  if (ALWAYS_ALLOWED_CHANNEL_IDS.has(channelId)) return false;
   const { blocked } = store.getConfig();
   return blocked.channels.some((c) => c.id === channelId);
 }
@@ -126,8 +135,9 @@ function isChannelBlocked(channelId) {
 // Canal com nome parecido a um canal já bloqueado (mesma lógica de nameTokens),
 // mesmo que o channelId seja diferente — usado quando já se tem o título em mãos
 // (página do canal, lista de inscrições), sem precisar de outro pedido à API.
-function isChannelNameBlocked(title) {
+function isChannelNameBlocked(title, channelId) {
   if (!title) return false;
+  if (channelId && ALWAYS_ALLOWED_CHANNEL_IDS.has(channelId)) return false;
   const { blocked } = store.getConfig();
   const norm = normalize(title);
   return blockedChannelNameTokens(blocked).some((tok) => norm.includes(tok));
@@ -441,7 +451,7 @@ async function channel(channelId, pageToken) {
       videoCount: st?.videoCount ?? null,
     };
   }
-  if (isChannelNameBlocked(info.title)) {
+  if (isChannelNameBlocked(info.title, channelId)) {
     return { channel: { id: channelId, title: '' }, items: [], blocked: true, nextPageToken: null };
   }
   const { videos, nextPageToken } = await channelUploads(channelId, pageToken);

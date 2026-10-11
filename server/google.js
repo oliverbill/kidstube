@@ -174,4 +174,4 @@ async function subscriptions() {
   return channels;
 }
 
-module.exports = { configured, connected, authUrl, exchangeCode, subscriptions };
+module.exports = { configured, connected, authUrl, exchangeCode, subscriptions, PINNED_CHANNELS };
