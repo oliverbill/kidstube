@@ -399,11 +399,19 @@ function renderShortsViewer(seq, items, initialNextPageToken) {
 
   const activate = (target) => {
     const mount = target.querySelector('.shorts-player-mount');
-    if (!mount || mount === activeMount) return;
-    destroyPlayer();
-    if (activeMount) activeMount.replaceChildren();
-    mount.replaceChildren(buildPlayer(target.dataset.videoId, { loop: true }));
-    activeMount = mount;
+    if (mount && mount !== activeMount) {
+      destroyPlayer();
+      if (activeMount) activeMount.replaceChildren();
+      mount.replaceChildren(buildPlayer(target.dataset.videoId, { loop: true }));
+      activeMount = mount;
+    }
+    // Pré-resolve o streaming dos 2 Shorts seguintes — sem isto, cada vídeo nunca
+    // visto custa o tempo do resolvedor (yt-dlp) inteiro no momento de arrastar.
+    let next = target.nextElementSibling;
+    for (let i = 0; i < 2 && next; i++) {
+      if (next.dataset?.videoId) prefetchStream(next.dataset.videoId);
+      next = next.nextElementSibling;
+    }
   };
 
   shortsItemObserver = new IntersectionObserver((entries) => {
@@ -537,6 +545,10 @@ async function viewWatch(id) {
   const seq = ++renderSeq;
   stopInfiniteScroll();
   showSkeletonWatch();
+  // Dispara o resolvedor (yt-dlp) já aqui, em paralelo com os metadados — em vez
+  // de só começar a resolver quando o player é montado (depois do vídeo/dados
+  // chegarem). Idempotente: se o card já tinha prefetchado no hover, não duplica.
+  if (!/^mock-/.test(id)) prefetchStream(id);
   try {
     const data = await apiGet(`/api/video/${encodeURIComponent(id)}`);
     if (seq !== renderSeq) return;
@@ -702,6 +714,11 @@ function loadYouTubeApi() {
   return ytApiPromise;
 }
 
+// Autoplay (shorts e vídeo normal) só é garantido pelos browsers sem gesto do
+// utilizador se começar sem som — a escolha de ligar o som mantém-se de um vídeo
+// para o seguinte, em vez de voltar a mudo sempre.
+let preferredMuted = true;
+
 let activePlayer = null; // { yt?, video?, timer }
 
 function destroyPlayer() {
@@ -764,7 +781,16 @@ function loadSource(video, src, timeoutMs = 20000) {
 }
 
 function wireNativeControls(video, ctx) {
-  const { player, shield, bigPlay, playBtn, seek, clock, fsBtn } = ctx;
+  const { player, shield, bigPlay, playBtn, seek, clock, fsBtn, muteBtn } = ctx;
+
+  const syncMute = () => { muteBtn.textContent = video.muted ? '🔇' : '🔊'; };
+  syncMute();
+  muteBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    video.muted = !video.muted;
+    preferredMuted = video.muted;
+    syncMute();
+  });
 
   const timer = setInterval(() => {
     const dur = Number.isFinite(video.duration) ? video.duration : 0;
@@ -824,6 +850,10 @@ async function attachNative(videoId, ctx) {
   video.preload = 'auto';
   video.controls = false;
   video.loop = ctx.loop;
+  // Começa sem som: é a única forma de o autoplay passar de forma fiável em todos
+  // os browsers (sobretudo o Safari do iPad) sem gesto do utilizador. O botão de
+  // som liga/desliga por vídeo, e a escolha mantém-se para o vídeo seguinte.
+  video.muted = ctx.muted;
 
   // Por ordem de preferência. Os dois primeiros vão direitos ao YouTube e não custam
   // nada ao servidor; os outros dois passam por ele, e só fazem falta quando o YouTube
@@ -864,7 +894,10 @@ function buildPlayer(videoId, opts = {}) {
   const shield = el('div', 'player-shield');
   const bigPlay = el('div', 'player-bigplay', '▶');
   shield.appendChild(bigPlay);
-  frame.append(mount, shield);
+  const muteBtn = el('button', 'player-mute-btn', '🔇');
+  muteBtn.type = 'button';
+  muteBtn.setAttribute('aria-label', 'Ligar/desligar o som');
+  frame.append(mount, shield, muteBtn);
 
   const controls = el('div', 'player-controls');
   const playBtn = el('button', 'player-btn', '▶');
@@ -894,7 +927,7 @@ function buildPlayer(videoId, opts = {}) {
     return player;
   }
 
-  const ctx = { player, frame, mount, shield, bigPlay, playBtn, seek, clock, fsBtn, loop };
+  const ctx = { player, frame, mount, shield, bigPlay, playBtn, seek, clock, fsBtn, muteBtn, loop, muted: preferredMuted };
 
   getStatus().then((status) => {
     if (!ctx.mount.isConnected) return; // já navegámos para outra página
@@ -909,10 +942,19 @@ function buildPlayer(videoId, opts = {}) {
 }
 
 function attachEmbed(videoId, ctx) {
-  const { player, frame, mount, shield, bigPlay, playBtn, seek, clock, fsBtn } = ctx;
+  const { player, frame, mount, shield, bigPlay, playBtn, seek, clock, fsBtn, muteBtn } = ctx;
 
   loadYouTubeApi().then(() => {
     if (!mount.isConnected) return; // já navegámos para outra página
+    const baseVars = {
+      controls: 0, rel: 0, playsinline: 1, disablekb: 1,
+      fs: 0, iv_load_policy: 3, autoplay: 1,
+      // "mute" não é um playerVar oficial da IFrame API, mas o player reconhece-o
+      // (é o mesmo parâmetro que o próprio youtube.com usa); junta-se a chamada a
+      // yt.mute() no onReady como garantia, para o autoplay nunca ficar bloqueado
+      // por já vir com som.
+      mute: ctx.muted ? 1 : 0,
+    };
     const yt = new YT.Player(mount, {
       videoId,
       // Este caminho é o plano B (sem resolvedor) e leva anúncios de qualquer forma:
@@ -920,17 +962,18 @@ function attachEmbed(videoId, ctx) {
       // por isso nem uma conta Premium o torna ad-free. Sendo assim, fica o domínio
       // nocookie — pelo menos não deixa rasto de tracking no aparelho da criança.
       host: 'https://www.youtube-nocookie.com',
-      playerVars: ctx.loop
-        ? {
-          controls: 0, rel: 0, playsinline: 1, disablekb: 1,
-          fs: 0, iv_load_policy: 3, autoplay: 1, loop: 1, playlist: videoId,
-        }
-        : {
-          controls: 0, rel: 0, playsinline: 1, disablekb: 1,
-          fs: 0, iv_load_policy: 3, autoplay: 1,
-        },
+      playerVars: ctx.loop ? { ...baseVars, loop: 1, playlist: videoId } : baseVars,
       events: {
         onReady: () => {
+          if (ctx.muted) yt.mute(); else yt.unMute();
+          const syncMute = () => { muteBtn.textContent = yt.isMuted() ? '🔇' : '🔊'; };
+          syncMute();
+          muteBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (yt.isMuted()) yt.unMute(); else yt.mute();
+            preferredMuted = yt.isMuted();
+            syncMute();
+          });
           const timer = setInterval(() => {
             if (!yt.getDuration) return;
             const dur = yt.getDuration() || 0;
