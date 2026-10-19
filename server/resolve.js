@@ -13,6 +13,9 @@
 // um <video> sabe tocar sem MSE.
 
 const { execFile } = require('node:child_process');
+const fs = require('node:fs');
+const path = require('node:path');
+const os = require('node:os');
 
 const YTDLP = process.env.YTDLP_PATH || 'yt-dlp';
 const CLIENT = process.env.KIDTUBE_YT_CLIENT || 'web_safari';
@@ -24,13 +27,28 @@ const CLIENT = process.env.KIDTUBE_YT_CLIENT || 'web_safari';
 // no VPS o ficheiro é montado antes de alguém lá pôr a sessão. Passar --cookies a
 // apontar para o vazio faria o yt-dlp falhar em todos os vídeos.
 const COOKIES = process.env.KIDTUBE_COOKIES || '';
+const WRITABLE_COOKIES = path.join(os.tmpdir(), 'kidstube-cookies.txt');
+
 const cookieArgs = (() => {
   if (!COOKIES) return [];
   try {
-    if (require('node:fs').statSync(COOKIES).size > 0) return ['--cookies', COOKIES];
-  } catch { /* não existe */ }
-  console.warn(`resolve: ${COOKIES} vazio ou inexistente — a resolver sem sessão.`);
-  return [];
+    if (fs.statSync(COOKIES).size === 0) throw new Error('vazio');
+  } catch {
+    console.warn(`resolve: ${COOKIES} vazio ou inexistente — a resolver sem sessão.`);
+    return [];
+  }
+  // O yt-dlp reescreve o cookie jar ao terminar (a sessão vai-se renovando entre
+  // pedidos) — se apontarmos --cookies direto para o segredo montado :ro, essa
+  // escrita falha a meio de uma resolução que já tinha corrido bem (o yt-dlp sai
+  // com erro mesmo tendo posto o resultado em stdout). Copia-se uma vez para um
+  // caminho gravável; o yt-dlp passa a gerir essa cópia sozinho a partir daí.
+  try {
+    if (!fs.existsSync(WRITABLE_COOKIES)) fs.copyFileSync(COOKIES, WRITABLE_COOKIES);
+    return ['--cookies', WRITABLE_COOKIES];
+  } catch (err) {
+    console.warn(`resolve: não foi possível preparar cópia gravável dos cookies (${err.message}) — a resolver sem sessão.`);
+    return [];
+  }
 })();
 const MAX_HEIGHT = Number(process.env.KIDTUBE_MAX_HEIGHT) || 1080;
 const TIMEOUT_MS = Number(process.env.KIDTUBE_RESOLVE_TIMEOUT_MS) || 45_000;
