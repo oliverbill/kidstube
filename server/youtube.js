@@ -254,9 +254,10 @@ async function home(pageToken) {
   return { items: result.items, nextPageToken };
 }
 
-async function search(q, pageToken) {
+async function search(q, pageToken, opts) {
   if (isQueryBlocked(q)) return { blockedQuery: true, items: [], nextPageToken: null };
   const cfg = store.getConfig();
+  const videoDuration = opts?.videoDuration;
   let videos;
   let nextPageToken = null;
   if (usingMock()) {
@@ -274,6 +275,7 @@ async function search(q, pageToken) {
         q,
         maxResults: PAGE_SIZE,
         safeSearch: cfg.safeSearch,
+        videoDuration,
         pageToken: token,
       });
       const pageVideos = (data.items || [])
@@ -287,6 +289,20 @@ async function search(q, pageToken) {
     nextPageToken = token || null;
   }
   return { blockedQuery: false, items: filterVideos(videos).map(stripDescription), nextPageToken };
+}
+
+// Shorts: mesma rotação cíclica de temas da fase 2 da home, mas filtrando por
+// videoDuration=short (proxy da Data API para vídeos curtos/Shorts). Passa pelo
+// mesmo search()/filterVideos() — o bloqueio funciona de forma idêntica à home.
+async function shorts(pageToken) {
+  const m = /^sr:(\d+):(.*)$/.exec(pageToken || '');
+  const idx = m ? Number(m[1]) % HOME_SEED_QUERIES.length : 0;
+  const seedToken = m && m[2] ? m[2] : undefined;
+  const result = await search(HOME_SEED_QUERIES[idx], seedToken, { videoDuration: 'short' });
+  const nextPageToken = result.nextPageToken
+    ? `sr:${idx}:${result.nextPageToken}`
+    : `sr:${(idx + 1) % HOME_SEED_QUERIES.length}:`;
+  return { items: result.items, nextPageToken };
 }
 
 // Sugestões de pesquisa — o mesmo endpoint de autocomplete que o YouTube usa no seu
@@ -465,6 +481,7 @@ module.exports = {
   isoDuration,
   home,
   search,
+  shorts,
   suggest,
   searchChannels,
   videoDetails,

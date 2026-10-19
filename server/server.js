@@ -490,6 +490,12 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, result);
   }
 
+  if (method === 'GET' && p === '/api/shorts') {
+    const pageToken = url.searchParams.get('pageToken') || undefined;
+    const result = await yt.shorts(pageToken);
+    return sendJson(res, 200, result);
+  }
+
   if (method === 'GET' && p === '/api/search') {
     const q = (url.searchParams.get('q') || '').trim();
     if (!q) return sendError(res, 400, 'Parâmetro q em falta.');

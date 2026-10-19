@@ -350,6 +350,36 @@ async function viewHome() {
   }
 }
 
+async function viewShorts() {
+  const seq = ++renderSeq;
+  stopInfiniteScroll();
+  showSkeletonGrid();
+  try {
+    const data = await apiGet('/api/shorts');
+    if (seq !== renderSeq) return;
+    app.replaceChildren();
+    app.appendChild(el('h1', 'page-title', 'Shorts'));
+    if (!data.items?.length) {
+      showMessage({ emoji: '📺', title: 'Sem Shorts por agora', text: 'Volta mais tarde!' });
+      return;
+    }
+    const grid = videoGrid(data.items);
+    app.appendChild(grid);
+    let nextPageToken = data.nextPageToken || null;
+    if (nextPageToken) {
+      startInfiniteScroll(seq, async () => {
+        const more = await apiGet(`/api/shorts?pageToken=${encodeURIComponent(nextPageToken)}`);
+        if (seq !== renderSeq) return false;
+        for (const v of more.items || []) grid.appendChild(videoCard(v));
+        nextPageToken = more.nextPageToken || null;
+        return Boolean(nextPageToken);
+      });
+    }
+  } catch {
+    if (seq === renderSeq) showError(viewShorts);
+  }
+}
+
 async function viewSearch(query) {
   const seq = ++renderSeq;
   stopInfiniteScroll();
@@ -848,6 +878,7 @@ function route() {
   else if (name === 'channel' && arg) viewChannel(arg);
   else if (name === 'subscriptions') viewSubscriptions();
   else if (name === 'history') viewHistory();
+  else if (name === 'shorts') viewShorts();
   else viewHome();
 }
 
