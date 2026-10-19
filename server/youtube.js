@@ -291,18 +291,32 @@ async function search(q, pageToken, opts) {
   return { blockedQuery: false, items: filterVideos(videos).map(stripDescription), nextPageToken };
 }
 
+// "m:ss" / "h:mm:ss" (já formatado por isoDuration) -> segundos totais.
+function durationSeconds(formatted) {
+  if (!formatted) return null;
+  return formatted.split(':').reduce((acc, v) => acc * 60 + Number(v), 0);
+}
+
+// Teto de duração de um Short (o próprio YouTube usa 3 minutos).
+const SHORTS_MAX_SECONDS = 180;
+
 // Shorts: mesma rotação cíclica de temas da fase 2 da home, mas filtrando por
-// videoDuration=short (proxy da Data API para vídeos curtos/Shorts). Passa pelo
-// mesmo search()/filterVideos() — o bloqueio funciona de forma idêntica à home.
+// videoDuration=short (proxy da Data API, <4min) e depois por duração real
+// (<=3min) para não deixar passar vídeo normal só por calhar de ser curto.
+// Passa pelo mesmo search()/filterVideos() — o bloqueio funciona como na home.
 async function shorts(pageToken) {
   const m = /^sr:(\d+):(.*)$/.exec(pageToken || '');
   const idx = m ? Number(m[1]) % HOME_SEED_QUERIES.length : 0;
   const seedToken = m && m[2] ? m[2] : undefined;
   const result = await search(HOME_SEED_QUERIES[idx], seedToken, { videoDuration: 'short' });
+  const items = result.items.filter((v) => {
+    const secs = durationSeconds(v.duration);
+    return secs == null || secs <= SHORTS_MAX_SECONDS;
+  });
   const nextPageToken = result.nextPageToken
     ? `sr:${idx}:${result.nextPageToken}`
     : `sr:${(idx + 1) % HOME_SEED_QUERIES.length}:`;
-  return { items: result.items, nextPageToken };
+  return { items, nextPageToken };
 }
 
 // Sugestões de pesquisa — o mesmo endpoint de autocomplete que o YouTube usa no seu

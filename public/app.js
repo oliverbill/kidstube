@@ -350,33 +350,142 @@ async function viewHome() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Shorts — feed vertical de toque/arrasto, como no YouTube: um vídeo por ecrã
+// (scroll-snap), em loop automático; só o item visível tem player (os outros
+// mostram só a miniatura), para nunca haver dois vídeos a tocar ao mesmo tempo.
+// ---------------------------------------------------------------------------
+
+let shortsItemObserver = null; // decide qual .shorts-item está ativo (tapa o ecrã)
+let shortsPageObserver = null; // scroll infinito dentro do feed vertical
+
+function stopShortsObservers() {
+  if (shortsItemObserver) { shortsItemObserver.disconnect(); shortsItemObserver = null; }
+  if (shortsPageObserver) { shortsPageObserver.disconnect(); shortsPageObserver = null; }
+}
+
+function shortsItem(video) {
+  const item = el('div', 'shorts-item');
+  item.dataset.videoId = video.id;
+
+  const thumb = document.createElement('img');
+  thumb.className = 'shorts-thumb';
+  thumb.src = video.thumbnail || '';
+  thumb.alt = '';
+  thumb.loading = 'lazy';
+  item.appendChild(thumb);
+  item.appendChild(el('div', 'shorts-player-mount'));
+
+  const overlay = el('div', 'shorts-overlay');
+  const chan = el('div', 'shorts-channel');
+  const inicial = (video.channelTitle || '?').trim().charAt(0).toUpperCase() || '?';
+  chan.appendChild(el('span', 'channel-avatar', inicial));
+  chan.appendChild(el('span', null, video.channelTitle || ''));
+  overlay.appendChild(chan);
+  if (video.title) overlay.appendChild(el('div', 'shorts-title', video.title));
+  item.appendChild(overlay);
+
+  return item;
+}
+
+function renderShortsViewer(seq, items, initialNextPageToken) {
+  app.replaceChildren();
+  const viewer = el('div', 'shorts-viewer');
+  app.appendChild(viewer);
+
+  let nextPageToken = initialNextPageToken;
+  let loadingMore = false;
+  let activeMount = null;
+
+  const activate = (target) => {
+    const mount = target.querySelector('.shorts-player-mount');
+    if (!mount || mount === activeMount) return;
+    destroyPlayer();
+    if (activeMount) activeMount.replaceChildren();
+    mount.replaceChildren(buildPlayer(target.dataset.videoId, { loop: true }));
+    activeMount = mount;
+  };
+
+  shortsItemObserver = new IntersectionObserver((entries) => {
+    if (seq !== renderSeq) { stopShortsObservers(); return; }
+    let best = null;
+    for (const entry of entries) {
+      if (entry.isIntersecting && entry.intersectionRatio >= 0.6) {
+        if (!best || entry.intersectionRatio > best.intersectionRatio) best = entry;
+      }
+    }
+    if (best) activate(best.target);
+  }, { root: viewer, threshold: [0.6] });
+
+  const sentinel = el('div', 'shorts-sentinel');
+
+  // Um tema da rotação pode voltar sem sobreviventes (tudo bloqueado, ou sem
+  // Shorts nesse tema) — a posição do sentinel não muda nesse caso, por isso o
+  // IntersectionObserver não dispara de novo por si só; em vez de esperar por
+  // outro evento de intersecção, pede-se logo a página seguinte. Travão pelo
+  // número de tentativas vazias seguidas, para não martelar a API sem fim.
+  let emptyStreak = 0;
+  const MAX_EMPTY_STREAK = 20;
+
+  const fetchMore = () => {
+    if (!nextPageToken || loadingMore) return;
+    loadingMore = true;
+    apiGet(`/api/shorts?pageToken=${encodeURIComponent(nextPageToken)}`)
+      .then((more) => {
+        if (seq !== renderSeq) return;
+        for (const v of more.items || []) {
+          const item = shortsItem(v);
+          viewer.insertBefore(item, sentinel);
+          shortsItemObserver.observe(item);
+        }
+        nextPageToken = more.nextPageToken || null;
+        loadingMore = false;
+        emptyStreak = more.items?.length ? 0 : emptyStreak + 1;
+        if (!nextPageToken || emptyStreak >= MAX_EMPTY_STREAK) shortsPageObserver?.disconnect();
+        else if (!more.items?.length) fetchMore();
+      })
+      .catch(() => { loadingMore = false; });
+  };
+
+  shortsPageObserver = new IntersectionObserver((entries) => {
+    if (seq !== renderSeq) return;
+    if (entries[0].isIntersecting) fetchMore();
+  }, { root: viewer, rootMargin: '0px 0px 1200px 0px' });
+
+  for (const v of items) {
+    const item = shortsItem(v);
+    viewer.appendChild(item);
+    shortsItemObserver.observe(item);
+  }
+  viewer.appendChild(sentinel);
+  shortsPageObserver.observe(sentinel);
+
+  const first = viewer.firstElementChild;
+  if (first) activate(first);
+}
+
 async function viewShorts() {
   const seq = ++renderSeq;
   stopInfiniteScroll();
-  showSkeletonGrid();
+  stopShortsObservers();
+  destroyPlayer();
+  app.replaceChildren();
+  app.classList.add('shorts-active');
+  app.appendChild(el('div', 'shorts-loading', 'A carregar Shorts…'));
   try {
     const data = await apiGet('/api/shorts');
     if (seq !== renderSeq) return;
-    app.replaceChildren();
-    app.appendChild(el('h1', 'page-title', 'Shorts'));
     if (!data.items?.length) {
-      showMessage({ emoji: '📺', title: 'Sem Shorts por agora', text: 'Volta mais tarde!' });
+      app.classList.remove('shorts-active');
+      showMessage({ emoji: '📱', title: 'Sem Shorts por agora', text: 'Volta mais tarde!' });
       return;
     }
-    const grid = videoGrid(data.items);
-    app.appendChild(grid);
-    let nextPageToken = data.nextPageToken || null;
-    if (nextPageToken) {
-      startInfiniteScroll(seq, async () => {
-        const more = await apiGet(`/api/shorts?pageToken=${encodeURIComponent(nextPageToken)}`);
-        if (seq !== renderSeq) return false;
-        for (const v of more.items || []) grid.appendChild(videoCard(v));
-        nextPageToken = more.nextPageToken || null;
-        return Boolean(nextPageToken);
-      });
-    }
+    renderShortsViewer(seq, data.items, data.nextPageToken || null);
   } catch {
-    if (seq === renderSeq) showError(viewShorts);
+    if (seq === renderSeq) {
+      app.classList.remove('shorts-active');
+      showError(viewShorts);
+    }
   }
 }
 
@@ -714,6 +823,7 @@ async function attachNative(videoId, ctx) {
   video.setAttribute('webkit-playsinline', '');
   video.preload = 'auto';
   video.controls = false;
+  video.loop = ctx.loop;
 
   // Por ordem de preferência. Os dois primeiros vão direitos ao YouTube e não custam
   // nada ao servidor; os outros dois passam por ele, e só fazem falta quando o YouTube
@@ -746,7 +856,8 @@ function formatClock(totalSeconds) {
   return h ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`;
 }
 
-function buildPlayer(videoId) {
+function buildPlayer(videoId, opts = {}) {
+  const loop = Boolean(opts.loop);
   const player = el('div', 'player');
   const frame = el('div', 'player-frame');
   const mount = el('div');
@@ -783,7 +894,7 @@ function buildPlayer(videoId) {
     return player;
   }
 
-  const ctx = { player, frame, mount, shield, bigPlay, playBtn, seek, clock, fsBtn };
+  const ctx = { player, frame, mount, shield, bigPlay, playBtn, seek, clock, fsBtn, loop };
 
   getStatus().then((status) => {
     if (!ctx.mount.isConnected) return; // já navegámos para outra página
@@ -809,10 +920,15 @@ function attachEmbed(videoId, ctx) {
       // por isso nem uma conta Premium o torna ad-free. Sendo assim, fica o domínio
       // nocookie — pelo menos não deixa rasto de tracking no aparelho da criança.
       host: 'https://www.youtube-nocookie.com',
-      playerVars: {
-        controls: 0, rel: 0, playsinline: 1, disablekb: 1,
-        fs: 0, iv_load_policy: 3, autoplay: 1,
-      },
+      playerVars: ctx.loop
+        ? {
+          controls: 0, rel: 0, playsinline: 1, disablekb: 1,
+          fs: 0, iv_load_policy: 3, autoplay: 1, loop: 1, playlist: videoId,
+        }
+        : {
+          controls: 0, rel: 0, playsinline: 1, disablekb: 1,
+          fs: 0, iv_load_policy: 3, autoplay: 1,
+        },
       events: {
         onReady: () => {
           const timer = setInterval(() => {
@@ -866,6 +982,10 @@ function attachEmbed(videoId, ctx) {
 
 function route() {
   destroyPlayer();
+  if (location.hash.slice(1).split('/')[0] !== 'shorts') {
+    stopShortsObservers();
+    app.classList.remove('shorts-active');
+  }
   const hash = location.hash || '#home';
   const sep = hash.indexOf('/');
   const name = sep === -1 ? hash.slice(1) : hash.slice(1, sep);
