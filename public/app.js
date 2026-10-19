@@ -399,18 +399,22 @@ function renderShortsViewer(seq, items, initialNextPageToken) {
 
   const activate = (target) => {
     const mount = target.querySelector('.shorts-player-mount');
-    if (mount && mount !== activeMount) {
-      destroyPlayer();
-      if (activeMount) activeMount.replaceChildren();
-      mount.replaceChildren(buildPlayer(target.dataset.videoId, { loop: true }));
-      activeMount = mount;
-    }
-    // Pré-resolve o streaming dos 2 Shorts seguintes — sem isto, cada vídeo nunca
-    // visto custa o tempo do resolvedor (yt-dlp) inteiro no momento de arrastar.
-    let next = target.nextElementSibling;
-    for (let i = 0; i < 2 && next; i++) {
-      if (next.dataset?.videoId) prefetchStream(next.dataset.videoId);
-      next = next.nextElementSibling;
+    if (!mount || mount === activeMount) return;
+    destroyPlayer();
+    if (activeMount) activeMount.replaceChildren();
+    mount.replaceChildren(buildPlayer(target.dataset.videoId, { loop: true }));
+    activeMount = mount;
+  };
+
+  // Pré-resolve o streaming de TODOS os Shorts já carregados assim que chegam —
+  // num feed de arrasto sequencial (ao contrário de uma grelha, onde só 1 em 20
+  // vídeos é visto) quase todos os itens carregados vão mesmo ser vistos, por
+  // isso vale a pena resolver todos em paralelo logo de início, em vez de só o
+  // próximo: dá o máximo de tempo de avanço antes do utilizador lá chegar.
+  const prefetchAll = (elements) => {
+    for (const item of elements) {
+      const id = item.dataset?.videoId;
+      if (id) prefetchStream(id);
     }
   };
 
@@ -441,11 +445,14 @@ function renderShortsViewer(seq, items, initialNextPageToken) {
     apiGet(`/api/shorts?pageToken=${encodeURIComponent(nextPageToken)}`)
       .then((more) => {
         if (seq !== renderSeq) return;
+        const added = [];
         for (const v of more.items || []) {
           const item = shortsItem(v);
           viewer.insertBefore(item, sentinel);
           shortsItemObserver.observe(item);
+          added.push(item);
         }
+        prefetchAll(added);
         nextPageToken = more.nextPageToken || null;
         loadingMore = false;
         emptyStreak = more.items?.length ? 0 : emptyStreak + 1;
@@ -460,13 +467,16 @@ function renderShortsViewer(seq, items, initialNextPageToken) {
     if (entries[0].isIntersecting) fetchMore();
   }, { root: viewer, rootMargin: '0px 0px 1200px 0px' });
 
+  const initialElements = [];
   for (const v of items) {
     const item = shortsItem(v);
     viewer.appendChild(item);
     shortsItemObserver.observe(item);
+    initialElements.push(item);
   }
   viewer.appendChild(sentinel);
   shortsPageObserver.observe(sentinel);
+  prefetchAll(initialElements);
 
   const first = viewer.firstElementChild;
   if (first) activate(first);

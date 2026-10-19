@@ -45,6 +45,33 @@ const VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
 const cache = new Map();    // videoId -> { info, notAfter }
 const inflight = new Map(); // videoId -> Promise<info>
 
+// O feed de Shorts pré-resolve todos os vídeos já carregados de uma vez (não só
+// o próximo) para o arrasto parecer instantâneo — sem um limite aqui, isso
+// dispararia um yt-dlp por vídeo em paralelo e a concorrência no VPS acabaria
+// por atrasar justamente o vídeo que o utilizador precisa agora. O excesso
+// fica em fila e sai pela ordem de chegada.
+const MAX_CONCURRENT_RESOLVES = Number(process.env.KIDTUBE_RESOLVE_CONCURRENCY) || 3;
+let runningResolves = 0;
+const resolveQueue = [];
+
+function withConcurrencyLimit(fn) {
+  return new Promise((resolve, reject) => {
+    const run = () => {
+      runningResolves++;
+      fn().then(
+        (v) => { runningResolves--; drainResolveQueue(); resolve(v); },
+        (e) => { runningResolves--; drainResolveQueue(); reject(e); },
+      );
+    };
+    if (runningResolves < MAX_CONCURRENT_RESOLVES) run();
+    else resolveQueue.push(run);
+  });
+}
+
+function drainResolveQueue() {
+  if (resolveQueue.length && runningResolves < MAX_CONCURRENT_RESOLVES) resolveQueue.shift()();
+}
+
 function isVideoId(id) {
   return typeof id === 'string' && VIDEO_ID.test(id);
 }
@@ -164,7 +191,7 @@ async function resolveStream(videoId) {
 
   if (inflight.has(videoId)) return inflight.get(videoId);
 
-  const p = fetchInfo(videoId)
+  const p = withConcurrencyLimit(() => fetchInfo(videoId))
     .then((info) => {
       cache.set(videoId, { info, notAfter: info.expiresAt - EXPIRY_MARGIN_MS });
       return info;
