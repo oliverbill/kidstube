@@ -258,6 +258,9 @@ async function search(q, pageToken, opts) {
   if (isQueryBlocked(q)) return { blockedQuery: true, items: [], nextPageToken: null };
   const cfg = store.getConfig();
   const videoDuration = opts?.videoDuration;
+  // Só enviesa o texto enviado à API real — no mock, a correspondência é por
+  // substring literal e "#shorts" colado ao termo não bateria com nada.
+  const apiQuery = opts?.shortsBias ? `${q} #shorts` : q;
   let videos;
   let nextPageToken = null;
   if (usingMock()) {
@@ -272,7 +275,7 @@ async function search(q, pageToken, opts) {
       const data = await apiGet('/search', {
         part: 'snippet',
         type: 'video',
-        q,
+        q: apiQuery,
         maxResults: PAGE_SIZE,
         safeSearch: cfg.safeSearch,
         videoDuration,
@@ -297,18 +300,22 @@ function durationSeconds(formatted) {
   return formatted.split(':').reduce((acc, v) => acc * 60 + Number(v), 0);
 }
 
-// Teto de duração de um Short (o próprio YouTube usa 3 minutos).
-const SHORTS_MAX_SECONDS = 180;
+// videoDuration=short da API só garante "<4 minutos" — passam nele vídeos oficiais
+// normais (ex.: um videoclipe de 2:54), que não são Shorts nenhum. Um Short de
+// verdade é, na prática, bem mais curto do que o teto técnico de 3 min que o
+// YouTube passou a permitir em 2024; por isso o corte aqui é mais apertado (60s)
+// do que o limite da plataforma, para não deixar vídeo normal passar por acaso.
+const SHORTS_MAX_SECONDS = 60;
 
-// Shorts: mesma rotação cíclica de temas da fase 2 da home, mas filtrando por
-// videoDuration=short (proxy da Data API, <4min) e depois por duração real
-// (<=3min) para não deixar passar vídeo normal só por calhar de ser curto.
+// Shorts: mesma rotação cíclica de temas da fase 2 da home, mas com a busca
+// enviesada para "#shorts" (a tag que os próprios criadores usam para entrar no
+// separador de Shorts) e filtrando por videoDuration=short + duração real curta.
 // Passa pelo mesmo search()/filterVideos() — o bloqueio funciona como na home.
 async function shorts(pageToken) {
   const m = /^sr:(\d+):(.*)$/.exec(pageToken || '');
   const idx = m ? Number(m[1]) % HOME_SEED_QUERIES.length : 0;
   const seedToken = m && m[2] ? m[2] : undefined;
-  const result = await search(HOME_SEED_QUERIES[idx], seedToken, { videoDuration: 'short' });
+  const result = await search(HOME_SEED_QUERIES[idx], seedToken, { videoDuration: 'short', shortsBias: true });
   const items = result.items.filter((v) => {
     const secs = durationSeconds(v.duration);
     return secs == null || secs <= SHORTS_MAX_SECONDS;
