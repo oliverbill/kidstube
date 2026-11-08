@@ -1,11 +1,11 @@
-/* KidTube — estilo YouTube dark, otimizado para iPad Safari */
+/* KidTube — estilo YouTube claro, otimizado para iPad Safari */
 
 :root {
-  --bg: #0f0f0f;
-  --bg-raised: #212121;
-  --bg-hover: #3d3d3d;
-  --text: #f1f1f1;
-  --text-dim: #aaaaaa;
+  --bg: #ffffff;
+  --bg-raised: #f2f2f2;
+  --bg-hover: #e5e5e5;
+  --text: #0f0f0f;
+  --text-dim: #606060;
   --red: #ff0000;
   --topbar-h: 64px;
   --radius: 12px;
@@ -49,7 +49,7 @@ a { color: inherit; text-decoration: none; }
   padding-left: max(20px, env(safe-area-inset-left));
   padding-right: max(20px, env(safe-area-inset-right));
   background: var(--bg);
-  border-bottom: 1px solid #272727;
+  border-bottom: 1px solid #e0e0e0;
 }
 
 .logo {
@@ -107,8 +107,8 @@ a { color: inherit; text-decoration: none; }
   padding: 0 18px;
   font-size: 17px;
   color: var(--text);
-  background: #121212;
-  border: 1px solid #303030;
+  background: #ffffff;
+  border: 1px solid #ccc;
   border-right: none;
   border-radius: 23px 0 0 23px;
   outline: none;
@@ -127,7 +127,7 @@ a { color: inherit; text-decoration: none; }
   justify-content: center;
   color: var(--text);
   background: var(--bg-raised);
-  border: 1px solid #303030;
+  border: 1px solid #ccc;
   border-radius: 0 23px 23px 0;
   cursor: pointer;
 }
@@ -146,9 +146,9 @@ a { color: inherit; text-decoration: none; }
   padding: 8px 0;
   list-style: none;
   background: var(--bg-raised);
-  border: 1px solid #303030;
+  border: 1px solid #ccc;
   border-radius: var(--radius);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
   max-height: min(70vh, 560px);
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
@@ -412,7 +412,7 @@ a { color: inherit; text-decoration: none; }
   touch-action: manipulation;
   border-radius: 8px;
 }
-.player-btn:hover { background: rgba(255, 255, 255, 0.1); }
+.player-btn:hover { background: rgba(0, 0, 0, 0.08); }
 
 .player-seek {
   flex: 1 1 auto;
@@ -521,8 +521,8 @@ a { color: inherit; text-decoration: none; }
   padding: 12px 28px;
   font-size: 16px;
   font-weight: 500;
-  color: #0f0f0f;
-  background: var(--text);
+  color: #fff;
+  background: #0f0f0f;
   border: none;
   border-radius: 24px;
   cursor: pointer;
